@@ -1,0 +1,188 @@
+// --- KONFIGURACE ---
+const int PIEZO_PIN = A1;            // Senzor na pinu A1
+const int OUTPUT_PIN = 8;            // Hlavní akční pin (2s při úspěchu)
+const int STATUS_PIN = 9;            // Stavový pin (bzučák/LED - signalizuje každé běžné/špatné ťuknutí)
+
+const int THRESHOLD = 50;            // Citlivost (ideální se stabilizátorem a 1M rezistorem)
+const int DEBOUNCE_TIME_MS = 150;    // Ochrana proti falešným zákmitům
+const int RESET_DELAY_MS = 1500;
+
+const float RATIO_TOLERANCE = 0.30;  // Tolerance +/- 30 % od průměrného tempa
+
+// RYTMUS: 1200, 350, 350, 350, 1200 (5 intervalů = 6 ťuknutí)
+const long RHYTHM_PATTERN[] = {1200, 350, 350, 350, 1200};
+const int RHYTHM_LENGTH = 5; 
+
+// --- PROMĚNNÉ PRO KONTINUÁLNÍ MĚŘENÍ ---
+int intervalCount = 0;               // Kolik intervalů už máme v paměti (max 5)
+unsigned long lastTapTime = 0; 
+long measuredIntervals[RHYTHM_LENGTH]; 
+
+// --- PROMĚNNÉ PRO NEBLOKUJÍCÍ PÍPÁNÍ A ZÁMEK ---
+unsigned long beepEndTime = 0;       // Kdy se má vypnout aktuální pípnutí
+bool isBeeping = false;
+unsigned long lockEndTime = 0;       // Kdy se má vypnout zámek (Pin 8)
+bool isUnlocked = false;
+
+
+void setup() {
+  // ZRYCHLENÍ KOMUNIKACE: Běžný výpis textu teď trvá zlomek času
+  Serial.begin(115200); 
+  
+  pinMode(OUTPUT_PIN, OUTPUT);
+  pinMode(STATUS_PIN, OUTPUT);
+  
+  digitalWrite(OUTPUT_PIN, LOW);
+  digitalWrite(STATUS_PIN, LOW);
+
+  Serial.println("--- System Start (Kontinualni, Neblokujici rezim) ---");
+  Serial.println("Posloucham... Kdykoliv vyklepej spravnou sekvenci.");
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+
+  // 1. NEBLOKUJÍCÍ OBSLUHA HARDWARU (Běží neustále na pozadí)
+  
+  // Vypnutí pípáku, pokud mu vypršel čas
+  if (isBeeping && currentMillis >= beepEndTime) {
+    digitalWrite(STATUS_PIN, LOW);
+    isBeeping = false;
+  }
+
+  // Vypnutí zámku, pokud mu vypršel čas
+  if (isUnlocked && currentMillis >= lockEndTime) {
+    digitalWrite(OUTPUT_PIN, LOW);
+    isUnlocked = false;
+    resetRhythm(); // Paměť resetujeme až PO zavření zámku
+  }
+
+  // Během doby, kdy je zámek odemčený, ignorujeme senzory
+  if (isUnlocked) return; 
+
+  // 2. DETEKCE KLEPNUTÍ
+  int sensorReading = analogRead(PIEZO_PIN);
+
+  if (sensorReading > THRESHOLD) {
+    if (currentMillis - lastTapTime > DEBOUNCE_TIME_MS) { 
+      handleTap(currentMillis);
+      // Odstraněn delay(5), aby se neblokovalo čtení
+    }
+  }
+
+  // 3. Timeout reset (vymazání paměti po 3 sekundách nečinnosti)
+  if (lastTapTime > 0 && (currentMillis - lastTapTime) > 3000) { 
+      Serial.println("\n❌ Dlouha pauza. Mazu pamet (Timeout).");
+      triggerBeep(100); // Rychlé pípnutí na pozadí při resetu
+      resetRhythm();
+  }
+}
+
+// --- HLAVNÍ KONTINUÁLNÍ LOGIKA ---
+void handleTap(unsigned long currentTime) {
+  // Pokud je to úplně první ťuknutí (nebo první po resetu)
+  if (lastTapTime == 0) {
+    Serial.println("\n✅ Prvni t'uknuti zaznamenano...");
+    lastTapTime = currentTime;
+    triggerBeep(100); // 100 ms dlouhé pípnutí na pozadí
+    return;
+  }
+
+  // Spočítáme čas od posledního ťuknutí
+  long elapsedTime = currentTime - lastTapTime; 
+  
+  // Posuneme všechny staré intervaly v poli o jedno místo doleva (smažeme nejstarší)
+  for (int i = 0; i < RHYTHM_LENGTH - 1; i++) {
+    measuredIntervals[i] = measuredIntervals[i + 1];
+  }
+  // Zapíšeme nový interval na konec pole
+  measuredIntervals[RHYTHM_LENGTH - 1] = elapsedTime;
+  
+  // Zvýšíme počítadlo uložených intervalů (zastaví se na hodnotě 5)
+  if (intervalCount < RHYTHM_LENGTH) {
+    intervalCount++;
+  }
+
+  Serial.print("✅ T'uknuti (interval: ");
+  Serial.print(elapsedTime);
+  Serial.println(" ms)");
+  
+  lastTapTime = currentTime; 
+
+  bool isSuccess = false;
+
+  // Pokud už máme v paměti nasbíraných 5 intervalů (6 ťuknutí), zkusíme je vyhodnotit
+  if (intervalCount == RHYTHM_LENGTH) {
+    isSuccess = evaluateRhythm(); 
+  }
+
+  // Pokud ťuknutí nespustilo správný rytmus, spustíme pípnutí NA POZADÍ
+  if (!isSuccess) {
+    triggerBeep(100); // 100 ms
+  }
+}
+
+// Změněno na 'bool', abychom mohli informovat handleTap o (ne)úspěchu
+bool evaluateRhythm() {
+  float sumOfPatternTimes = 0.0;
+  float sumOfMeasuredTimes = 0.0;
+  
+  for (int i = 0; i < RHYTHM_LENGTH; i++) {
+    sumOfPatternTimes += RHYTHM_PATTERN[i];
+    sumOfMeasuredTimes += measuredIntervals[i];
+  }
+
+  float finalScaleFactor = sumOfMeasuredTimes / sumOfPatternTimes;
+  bool rhythmSuccess = true;
+  
+  Serial.print("--- KONTROLA POSLEDNICH 5 INTERVALU (Scale: x");
+  Serial.print(finalScaleFactor);
+  Serial.println(") ---");
+
+  for (int i = 0; i < RHYTHM_LENGTH; i++) {
+    long expectedScaledTime = RHYTHM_PATTERN[i] * finalScaleFactor; 
+    long minTime = expectedScaledTime * (1.0 - RATIO_TOLERANCE);
+    long maxTime = expectedScaledTime * (1.0 + RATIO_TOLERANCE);
+    
+    Serial.print("Int "); Serial.print(i + 1); Serial.print(": ");
+    Serial.print(measuredIntervals[i]); 
+
+    if (measuredIntervals[i] < minTime || measuredIntervals[i] > maxTime) {
+      Serial.print(" ms ❌ (Cil: "); Serial.print(expectedScaledTime); Serial.println(")");
+      rhythmSuccess = false;
+    } else {
+      Serial.print(" ms ✅ (Cil: "); Serial.print(expectedScaledTime); Serial.println(")");
+    }
+  }
+
+  if (rhythmSuccess) {
+    Serial.println("\n🎉🎉🎉 RYTMUS USPESNY! Aktivuji pin 8.");
+    
+    // Zapneme zámek a řekneme Arduinu, ať ho na pozadí za 2000 ms vypne
+    digitalWrite(OUTPUT_PIN, HIGH);
+    lockEndTime = millis() + 2000;
+    isUnlocked = true;
+    
+    // Pípák nevydává zvuk, takže neblokuje
+    return true; 
+  } else {
+    Serial.println("❌ Sekvence neodpovida. Cekam na dalsi t'uknuti...\n");
+    return false; 
+  }
+}
+
+// NOVÁ FUNKCE: Neblokující pípání
+void triggerBeep(unsigned long duration) {
+  digitalWrite(STATUS_PIN, HIGH);
+  beepEndTime = millis() + duration; // Zapamatujeme si, v jakém čase má pípák zmlknout
+  isBeeping = true;
+}
+
+// STARÁ FUNKCE SE MAŽE (nahrazena neblokující verzí)
+// void blinkStatus(int times) { ... }
+
+void resetRhythm() {
+  intervalCount = 0;
+  lastTapTime = 0; // Totální reset paměti času
+  Serial.println("\n--- Pripraven na novou sekvenci ---");
+}

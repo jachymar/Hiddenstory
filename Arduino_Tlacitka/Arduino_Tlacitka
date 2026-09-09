@@ -1,0 +1,270 @@
+#include <Servo.h>
+#include <Wire.h>
+
+#define SLAVE_ADDR 3
+
+/* --- KONFIGURACE PINŮ --- */
+const int tlacitka[] = {2, 3, 4, 5, 6};
+const int pinServoZamek = 9;   
+const int pinServoAnalog = 10; 
+const int analogPiny[] = {A1, A2, A3};
+
+/* --- NASTAVENÍ LOGIKY --- */
+const int heslo[] = {2, 5, 3, 4}; 
+const int THRESHOLD = 40; // O kolik se musí změnit hodnota k aktivaci
+
+/* --- I2C STAVY --- */
+volatile byte stavProESP = 0; 
+unsigned long casZmenyI2C = 0;
+const unsigned long DOBA_STAVU = 1000;
+volatile bool prikazOtevritB = false; 
+volatile bool prikazOtevritC = false;
+
+/* --- PROMĚNNÉ PRO ZÁMEK (Nezávislý Debounce pro každé tlačítko) --- */
+int zadaneHeslo[4];
+int pocitadloStisku = 0;
+const unsigned long CAS_PRO_UVOLNENI = 250; // 250 ms debounce na konkrétní tlačítko
+
+// Pole pro sledování stavu a času změny KAŽDÉHO tlačítka zvlášť (0 až 4)
+bool stavTlacitka[5] = {false, false, false, false, false}; 
+unsigned long casZmenyTlacitka[5] = {0, 0, 0, 0, 0};
+
+unsigned long posledniAktivitaHesla = 0;  
+unsigned long startServoZamek = 0;
+bool zamekVakci = false;
+
+/* --- PROMĚNNÉ PRO ANALOG --- */
+int referencniHodnoty[3] = {528, 493, 497}; // Pevně nastavený klidový stav
+bool stavPinuAktivni[3] = {false, false, false}; 
+unsigned long startCasPodminkyAnalog = 0; 
+unsigned long startCasResetuAnalog = 0;   
+unsigned long startServoAnalog = 0;
+bool analogServoVakci = false;
+bool aktivaceDokoncena = false; 
+
+Servo servoZamek;
+Servo servoAnalog;
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin(SLAVE_ADDR);
+  Wire.onRequest(requestEvent); 
+  Wire.onReceive(receiveEvent); 
+
+  for (int i = 0; i < 5; i++) pinMode(tlacitka[i], INPUT_PULLUP);
+
+  servoZamek.attach(pinServoZamek);
+  servoZamek.write(0);
+  servoAnalog.attach(pinServoAnalog);
+  servoAnalog.write(0);
+
+  Serial.println("==========================================");
+  Serial.println("          SYSTEM STARTUJE                 ");
+  Serial.println("==========================================");
+  
+  // Výpis pevných kalibračních hodnot
+  Serial.println("Pouzivam PEVNE kalibracni hodnoty senzoru:");
+  Serial.print("Senzor A1 nastaven na: "); Serial.println(referencniHodnoty[0]);
+  Serial.print("Senzor A2 nastaven na: "); Serial.println(referencniHodnoty[1]);
+  Serial.print("Senzor A3 nastaven na: "); Serial.println(referencniHodnoty[2]);
+
+  Serial.println("==========================================");
+  Serial.println("- Treshold analogu: Zmena o 40");
+  Serial.println("- Analog aktivace: 1.5s | Reset: 1.0s");
+  Serial.println("- Tlacitka: Nezávisly debounce 250ms");
+  Serial.println("==========================================");
+}
+
+void loop() {
+  unsigned long ted = millis();
+
+  // I2C RESET STAVU
+  if (stavProESP != 0 && (ted - casZmenyI2C > DOBA_STAVU)) stavProESP = 0;
+
+  // I2C PRIKAZY
+  if (prikazOtevritB && !zamekVakci) { 
+    Serial.println("[I2C] Prikaz k otevreni zamku!");
+    otevriZamek(ted); 
+    prikazOtevritB = false; 
+  }
+  if (prikazOtevritC && !analogServoVakci) { 
+    Serial.println("[I2C] Prikaz k aktivaci analogu!");
+    aktivujAnalogServo(ted); 
+    prikazOtevritC = false; 
+  }
+
+  handleButtons(ted);
+  handleAnalog(ted);
+
+  // NAVRAT SERV
+  if (zamekVakci && (ted - startServoZamek > 3000)) { 
+    servoZamek.write(0); 
+    zamekVakci = false; 
+    Serial.println("[SERVO 9] Zamek se mechanicky zavira.");
+  }
+  if (analogServoVakci && (ted - startServoAnalog > 2000)) { 
+    servoAnalog.write(0); 
+    analogServoVakci = false; 
+    Serial.println("[SERVO 10] Analogove servo se vraci.");
+  }
+}
+
+// Vyhlazení analogového signálu
+int getSmoothedAnalog(int pin) {
+  long sum = 0;
+  for (int i = 0; i < 10; i++) {
+    sum += analogRead(pin);
+  }
+  return sum / 10;
+}
+
+// --- LOGIKA KLÁVESNICE S NEZÁVISLÝM DEBOUNCE ---
+void handleButtons(unsigned long ted) {
+  // Automatický reset rozepsaného hesla po 5 sekundách nečinnosti
+  if (pocitadloStisku > 0 && (ted - posledniAktivitaHesla > 5000)) {
+    Serial.print("[KLAVESNICE] Zadavani trvalo prilis dlouho (>5s). Resetuji predchozi stisky (");
+    Serial.print(pocitadloStisku);
+    Serial.println("/4)");
+    pocitadloStisku = 0; 
+  }
+
+  // Nezávislá kontrola každého tlačítka
+  for (int i = 0; i < 5; i++) {
+    int pin = tlacitka[i];
+    bool fyzickyStisknuto = (digitalRead(pin) == LOW);
+
+    // Pokud se aktuální fyzický stav liší od toho, co máme v paměti a uběhl čas debounce
+    if (fyzickyStisknuto != stavTlacitka[i] && (ted - casZmenyTlacitka[i] >= CAS_PRO_UVOLNENI)) {
+      
+      stavTlacitka[i] = fyzickyStisknuto;
+      casZmenyTlacitka[i] = ted;
+
+      if (fyzickyStisknuto) {
+        // --- TLAČÍTKO BYLO PRÁVĚ ZMÁČKNUTO ---
+        posledniAktivitaHesla = ted;
+        
+        if (pocitadloStisku < 4) {
+          zadaneHeslo[pocitadloStisku] = pin;
+          pocitadloStisku++;
+          
+          Serial.print("[KLAVESNICE] Zmacknuto: "); 
+          Serial.print(pin);
+          Serial.print(" (Pozice v hesle: ");
+          Serial.print(pocitadloStisku);
+          Serial.println("/4)");
+        }
+
+        // Kontrola hesla při dosažení 4 stisků
+        if (pocitadloStisku == 4) {
+          Serial.println("\n[SYSTEM] Zadana 4 cisla. Spoustim kontrolu hesla...");
+          Serial.print("[SYSTEM] Zadano: ");
+          for(int k=0; k<4; k++) { Serial.print(zadaneHeslo[k]); Serial.print(" "); }
+          Serial.print(" | Ocekavano: ");
+          for(int k=0; k<4; k++) { Serial.print(heslo[k]); Serial.print(" "); }
+          Serial.println();
+
+          bool ok = true;
+          for (int j = 0; j < 4; j++) {
+            if (zadaneHeslo[j] != heslo[j]) {
+              ok = false;
+              break; 
+            }
+          }
+          
+          if (ok) {
+            Serial.println("[VYSLEDEK] >>> HESLO JE SPRAVNE <<< Oteviram zamek na 3s.");
+            otevriZamek(ted);
+          } else {
+            Serial.println("[VYSLEDEK] >>> HESLO JE NESPRAVNE <<< Hlasim chybu (I2C Stav 1).");
+            stavProESP = 1; 
+            casZmenyI2C = ted; 
+          }
+          
+          Serial.println("------------------------------------------");
+          pocitadloStisku = 0; // Reset pro další pokus
+        }
+      } else {
+        // --- TLAČÍTKO BYLO PRÁVĚ UVOLNĚNO ---
+        Serial.print("[KLAVESNICE] Pusteno: "); 
+        Serial.println(pin);
+      }
+    }
+  }
+}
+
+// --- LOGIKA ANALOGU S DYNAMICKOU KALIBRACÍ (Treshold 40) ---
+void handleAnalog(unsigned long ted) {
+  bool vsechnyZmeneny = true;
+
+  for (int i = 0; i < 3; i++) {
+    int hodnota = getSmoothedAnalog(analogPiny[i]);
+    // Změř rozdíl od startovní hodnoty. abs() zajistí kladný výsledek pro odchylku
+    int rozdil = abs(hodnota - referencniHodnoty[i]);
+    
+    // Je rozdíl větší nebo roven 40?
+    bool aktualneAktivni = (rozdil >= THRESHOLD);
+    
+    if (aktualneAktivni && !stavPinuAktivni[i]) {
+      stavPinuAktivni[i] = true;
+      Serial.print("[ANALOG] A"); Serial.print(i + 1); Serial.println(" zmenil stav (AKTIVNI).");
+    } 
+    else if (!aktualneAktivni && stavPinuAktivni[i]) {
+      stavPinuAktivni[i] = false;
+      Serial.print("[ANALOG] A"); Serial.print(i + 1); Serial.println(" se vratil (UVOLNEN).");
+    }
+
+    if (!aktualneAktivni) vsechnyZmeneny = false;
+  }
+
+  // ROZHODOVACÍ LOGIKA ČASOVAČE
+  if (vsechnyZmeneny) {
+    startCasResetuAnalog = 0; 
+
+    if (startCasPodminkyAnalog == 0 && !aktivaceDokoncena) {
+      startCasPodminkyAnalog = ted;
+      Serial.println("[ANALOG SYSTEM] Vsechny senzory aktivni. Startuji odpocet 1.5s...");
+    }
+    
+    if (startCasPodminkyAnalog != 0 && (ted - startCasPodminkyAnalog >= 1500) && !aktivaceDokoncena) {
+      Serial.println("[ANALOG AKCE] Cas vyprsel! Aktivuji analogove servo.");
+      aktivujAnalogServo(ted);
+    }
+  } 
+  else {
+    startCasPodminkyAnalog = 0; 
+
+    if (startCasResetuAnalog == 0) {
+      startCasResetuAnalog = ted; 
+    }
+
+    if (ted - startCasResetuAnalog >= 1000) {
+      if (aktivaceDokoncena) {
+        aktivaceDokoncena = false;
+        Serial.println("[ANALOG SYSTEM] 1s stabilita v klidu. System pripraven k nove aktivaci.");
+      }
+      startCasResetuAnalog = 0; 
+    }
+  }
+}
+
+// --- ZBYTEK FUNKCÍ ---
+void receiveEvent(int howMany) {
+  while (Wire.available()) {
+    char c = Wire.read();
+    if (c == 'B') prikazOtevritB = true;
+    if (c == 'C') prikazOtevritC = true;
+  }
+}
+
+void requestEvent() { Wire.write(stavProESP); }
+
+void otevriZamek(unsigned long ted) {
+  stavProESP = 2; casZmenyI2C = ted;
+  servoZamek.write(150); startServoZamek = ted; zamekVakci = true;
+}
+
+void aktivujAnalogServo(unsigned long ted) {
+  stavProESP = 3; casZmenyI2C = ted;
+  servoAnalog.write(90); startServoAnalog = ted;
+  analogServoVakci = true; aktivaceDokoncena = true;
+}
