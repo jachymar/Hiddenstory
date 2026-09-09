@@ -56,13 +56,11 @@ void loop() {
     resetRhythm();
   }
 
-  if (isUnlocked) return;
-
   // 2. DETEKCE KLEPNUTÍ (jen na náběžné hraně)
   int sensorReading = analogRead(PIEZO_PIN);
   bool sensorHigh = sensorReading > THRESHOLD;
 
-  if (sensorHigh && !piezoWasHigh) {
+  if (sensorHigh && !piezoWasHigh && !isUnlocked) {
     if (currentMillis - lastTapEventTime >= DEBOUNCE_TIME_MS) {
       handleTap(currentMillis);
       lastTapEventTime = currentMillis;
@@ -70,6 +68,8 @@ void loop() {
   }
 
   piezoWasHigh = sensorHigh;
+
+  if (isUnlocked) return;
 
   // 3. Timeout reset po 3 sekundách nečinnosti
   if (lastTapTime > 0 && (currentMillis - lastTapTime) > RESET_TIMEOUT_MS) {
@@ -185,8 +185,6 @@ void triggerBeep(unsigned long duration) {
 void resetRhythm() {
   intervalCount = 0;
   lastTapTime = 0;
-  lastTapEventTime = 0;
-  piezoWasHigh = false;
 
   for (int i = 0; i < RHYTHM_LENGTH; i++) {
     measuredIntervals[i] = 0;

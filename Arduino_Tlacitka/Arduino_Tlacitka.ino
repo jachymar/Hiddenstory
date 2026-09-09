@@ -28,6 +28,14 @@ bool zamekVakci = false;
 
 Servo servoZamek;
 
+struct I2CPacket {
+  byte status;
+  byte d1;
+  byte d2;
+  byte d3;
+};
+I2CPacket myTelemetry = {0, 0, 0, 0};
+
 void setup() {
   Serial.begin(9600);
   Wire.begin(SLAVE_ADDR);
@@ -72,6 +80,12 @@ void loop() {
     zamekVakci = false; 
     Serial.println("[SERVO 9] Zamek se mechanicky zavira.");
   }
+
+  // Aktualizace telemetrie pro ESP32
+  myTelemetry.status = stavProESP;
+  myTelemetry.d1 = (byte)pocitadloStisku;
+  myTelemetry.d2 = zamekVakci ? 1 : 0;
+  myTelemetry.d3 = 0;
 }
 
 void handleButtons(unsigned long ted) {
@@ -129,7 +143,7 @@ void receiveEvent(int howMany) {
 }
 
 void requestEvent() { 
-  Wire.write(stavProESP); 
+  Wire.write((byte*)&myTelemetry, sizeof(I2CPacket)); 
 }
 
 void otevriZamek(unsigned long ted) {

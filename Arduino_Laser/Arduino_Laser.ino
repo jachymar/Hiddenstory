@@ -33,6 +33,15 @@ bool laserIsOn = false;
 
 volatile byte i2cStatus = 0;
 byte lastStatusPrint = 255;
+int ldrValue = 0;
+
+struct I2CPacket {
+  byte status;
+  byte d1;
+  byte d2;
+  byte d3;
+};
+I2CPacket myTelemetry = {0, 0, 0, 0};
 
 void setup() {
   pinMode(PIN_LASER, OUTPUT);
@@ -52,10 +61,16 @@ void setup() {
 void loop() {
   // Dvojité čtení pro odstranění šumu
   analogRead(PIN_LDR);
-  int ldrValue = analogRead(PIN_LDR);
+  ldrValue = analogRead(PIN_LDR);
   
   bool anyButton = (digitalRead(PIN_BTN1) == LOW || digitalRead(PIN_BTN2) == LOW);
   bool switchActive = (digitalRead(PIN_SWITCH) == LOW);
+
+  // Aktualizace telemetrie pro ESP32
+  myTelemetry.status = i2cStatus;
+  myTelemetry.d1 = laserIsOn ? 1 : 0;
+  myTelemetry.d2 = alignmentMode ? 1 : 0;
+  myTelemetry.d3 = (ldrValue > 255) ? 255 : (byte)ldrValue;
 
   // --- LOGIKA PÁČKY (Stav 3) ---
   if (switchActive) {
@@ -133,7 +148,7 @@ void loop() {
 }
 
 void requestEvent() {
-  Wire.write((byte)i2cStatus); 
+  Wire.write((byte*)&myTelemetry, sizeof(I2CPacket)); 
 }
 
 void checkStatusPrint() {

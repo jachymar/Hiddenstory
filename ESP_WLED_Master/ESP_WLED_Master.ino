@@ -3,9 +3,23 @@
 
 // --- I2C ADRESY ARDUIN ---
 const int ADDR_LASERY         = 6;  // Modul hlavní páčky a laserů
-const int ADDR_TLACITKA       = 3;  // Modul tlačítek pro barvy a schránky (B, C)
+const int ADDR_TLACITKA       = 3;  // Modul tlačítek pro barvy a schránky (B)
+const int ADDR_KOLA           = 4;  // Modul kol / analogů (C)
 const int ADDR_SVETLA_LEBKA   = 8;  // Modul pro načtení krystalů a schránku Lebka (A)
 const int ADDR_AUDIO          = 10; // Modul pro zvuky a hudbu
+
+// --- TELEMETRIE ---
+struct I2CPacket {
+  byte status;
+  byte d1;
+  byte d2;
+  byte d3;
+};
+
+I2CPacket dataLaser = {0,0,0,0};
+I2CPacket dataTlacitka = {0,0,0,0};
+I2CPacket dataKola = {0,0,0,0};
+I2CPacket dataSvetla = {0,0,0,0};
 
 // --- STAVOVÉ PROMĚNNÉ HERNÍ LOGIKY ---
 int posledniS6 = -1; // Režim: 0=Herní, 1=Vypnuto/Lasery, 3=Pracovní
@@ -14,7 +28,10 @@ int posledniS8 = -1; // Krystaly: 2=Všechny krystaly uvnitř, 0=Nic
 
 int fyzickeS6 = -1;
 int fyzickeS3 = -1;
-int fyzickeS8 = -1; 
+int fyzickeS8 = -1;
+
+String posledniStateJson = "{}";
+unsigned long posledniStateSendMs = 0;
 
 bool inicializaceHotova = false;
 unsigned long casStartu = 0;
@@ -35,6 +52,21 @@ void posliPrikazI2C(int adresa, char prikaz) {
   }
 }
 
+// Funkce pro bezpečné vyčtení 4 bajtů z Arduina
+bool readTelemetry(int adresa, I2CPacket &packet) {
+  Wire.requestFrom(adresa, sizeof(I2CPacket));
+  if (Wire.available() == sizeof(I2CPacket)) {
+    packet.status = Wire.read();
+    packet.d1 = Wire.read();
+    packet.d2 = Wire.read();
+    packet.d3 = Wire.read();
+    return true;
+  }
+  // Pokud nesouhlasí velikost, vyprázdníme buffer
+  while (Wire.available()) Wire.read();
+  return false;
+}
+
 // Zpracování hlavní systémové změny a informování Audia a Komunikační brány
 void zpracujZmenuS6(int stav) {
   // 1. Změna hudby podle nového stavu
@@ -49,6 +81,30 @@ void zpracujZmenuS6(int stav) {
   Serial2.println("M" + String(stav));
   
   Serial.print("Logika: Režim změněn na "); Serial.println(stav);
+}
+
+String buildTelemetryState() {
+  String json = "{";
+  json += "\"mode\":" + String(posledniS6) + ",";
+  json += "\"buttons\":{\"state\":" + String(posledniS3) + ",\"pressed\":" + String(dataTlacitka.d1) + ",\"lock\":" + String(dataTlacitka.d2) + "},";
+  json += "\"crystals\":{\"state\":" + String(posledniS8) + ",\"placed\":" + String(dataSvetla.d1) + ",\"ledOn\":" + String(dataSvetla.d2) + "},";
+  json += "\"laser\":{\"state\":" + String(fyzickeS6) + ",\"isOn\":" + String(dataLaser.d1) + ",\"ldr\":" + String(dataLaser.d3) + "},";
+  json += "\"wheels\":{\"state\":" + String(dataKola.status) + ",\"a1\":" + String(dataKola.d1) + ",\"a2\":" + String(dataKola.d2) + ",\"a3\":" + String(dataKola.d3) + "},";
+  json += "\"system\":{\"initialized\":" + String(inicializaceHotova ? 1 : 0) + "}";
+  json += "}";
+  return json;
+}
+
+void posliTelemetryState(unsigned long ted) {
+  if (ted - posledniStateSendMs < 200) return;
+
+  String json = buildTelemetryState();
+  if (json != posledniStateJson) {
+    posledniStateJson = json;
+    Serial2.println("STATE|" + json);
+  }
+
+  posledniStateSendMs = ted;
 }
 
 void setup() {
@@ -90,16 +146,17 @@ void loop() {
         Serial.print("Brana žada otevreni schranky: "); Serial.println(cmd);
         if (cmd == 'A') posliPrikazI2C(ADDR_SVETLA_LEBKA, 'A');
         else if (cmd == 'B') posliPrikazI2C(ADDR_TLACITKA, 'B');
-        else if (cmd == 'C') posliPrikazI2C(ADDR_TLACITKA, 'C');
+        else if (cmd == 'C') posliPrikazI2C(ADDR_KOLA, 'C'); // Modul KOLA má příkaz C
         else if (cmd == 'D') Serial.println("POZOR: Oltar zatim nema I2C adresu!");
       }
     }
   }
 
   if (!inicializaceHotova && (ted - casStartu >= 7000)) {
-    Wire.requestFrom(ADDR_LASERY, 1); if (Wire.available()) fyzickeS6 = Wire.read();
-    Wire.requestFrom(ADDR_TLACITKA, 1); if (Wire.available()) fyzickeS3 = Wire.read();
-    Wire.requestFrom(ADDR_SVETLA_LEBKA, 1); if (Wire.available()) fyzickeS8 = Wire.read();
+    if (readTelemetry(ADDR_LASERY, dataLaser)) fyzickeS6 = dataLaser.status;
+    if (readTelemetry(ADDR_TLACITKA, dataTlacitka)) fyzickeS3 = dataTlacitka.status;
+    if (readTelemetry(ADDR_SVETLA_LEBKA, dataSvetla)) fyzickeS8 = dataSvetla.status;
+    readTelemetry(ADDR_KOLA, dataKola); // Kola se zatím používají jen pro data
     
     posledniS6 = fyzickeS6; 
     posledniS3 = fyzickeS3; 
@@ -120,9 +177,8 @@ void loop() {
   if (ted - posledniI2C_Lasery >= 30) {
     posledniI2C_Lasery = ted;
     
-    Wire.requestFrom(ADDR_LASERY, 1);
-    if (Wire.available()) {
-      int s = Wire.read();
+    if (readTelemetry(ADDR_LASERY, dataLaser)) {
+      int s = dataLaser.status;
       if (s != fyzickeS6) { 
         int staryFyzickeS6 = fyzickeS6;
         fyzickeS6 = s; 
@@ -156,17 +212,18 @@ void loop() {
       bool zmenaLebky = false;
       int s3 = fyzickeS3, s8 = fyzickeS8;
 
-      Wire.requestFrom(ADDR_TLACITKA, 1);
-      if (Wire.available()) {
-        int s = Wire.read();
+      if (readTelemetry(ADDR_TLACITKA, dataTlacitka)) {
+        int s = dataTlacitka.status;
         if (s != fyzickeS3 && s != 3) { s3 = s; fyzickeS3 = s; zmenaTlacitek = true; }
       }
       
-      Wire.requestFrom(ADDR_SVETLA_LEBKA, 1);
-      if (Wire.available()) {
-        int s = Wire.read();
+      if (readTelemetry(ADDR_SVETLA_LEBKA, dataSvetla)) {
+        int s = dataSvetla.status;
         if (s != fyzickeS8) { s8 = s; fyzickeS8 = s; zmenaLebky = true; }
       }
+      
+      // Měříme Kola pro telemetrii, Master zatím na jejich status jinak nereaguje
+      readTelemetry(ADDR_KOLA, dataKola);
       
       // Byla stisknuta nová kombinace barev
       if (zmenaTlacitek) {
@@ -192,4 +249,6 @@ void loop() {
       }
     }
   }
+
+  posliTelemetryState(ted);
 }

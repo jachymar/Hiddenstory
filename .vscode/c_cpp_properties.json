@@ -1,0 +1,23 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${env:USERPROFILE}/AppData/Local/Arduino15/libraries/**",
+                "${env:USERPROFILE}/AppData/Local/Arduino15/packages/arduino/hardware/avr/1.8.6/**",
+                "${env:USERPROFILE}/AppData/Local/Arduino15/packages/esp32/hardware/esp32/3.3.11/**",
+                "${env:USERPROFILE}/AppData/Local/Arduino15/packages/esp32/tools/esp32-libs/3.3.11/include/**",
+                "${env:USERPROFILE}/AppData/Local/Arduino15/packages/esp32/tools/esp32-libs/3.3.11/include/soc/**",
+                "${env:USERPROFILE}/AppData/Local/Arduino15/packages/esp32/tools/esp-x32/2601/xtensa-esp-elf/include/**",
+                "${env:USERPROFILE}/AppData/Local/Arduino15/packages/esp32/tools/esp-x32/2601/picolibc/xtensa-esp-elf/sys-include/**"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE"
+            ]
+        }
+    ],
+    "version": 4
+}

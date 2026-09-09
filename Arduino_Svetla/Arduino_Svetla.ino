@@ -68,6 +68,14 @@ bool vsechnaRozsvicena = false;
 unsigned long casStartuFaze[pocetSvetel] = {0, 0, 0, 0}; 
 int delkaZazehu[pocetSvetel], silaKolisani[pocetSvetel], rychlostNabehu[pocetSvetel];
 
+struct I2CPacket {
+  byte status;
+  byte d1;
+  byte d2;
+  byte d3;
+};
+I2CPacket myTelemetry = {0, 0, 0, 0};
+
 void setup() {
   Serial.begin(115200); 
   
@@ -331,6 +339,12 @@ void loop() {
       }
     }
   }
+
+  // Aktualizace telemetrie pro ESP32
+  myTelemetry.status = systemovyStav;
+  myTelemetry.d1 = krystalySplneny ? 1 : 0;
+  myTelemetry.d2 = (byte)aktualniRozsvicena;
+  myTelemetry.d3 = (byte)aktualniVypnuta;
 }
 
 // --- FUNKCE PRO ZÁPIS NA ONEWIRE (Odeslání k Lebce) ---
@@ -357,7 +371,7 @@ void ctiOneWire() {
 
 // --- I2C FUNKCE ---
 void requestEvent() { 
-  Wire.write(systemovyStav); 
+  Wire.write((byte*)&myTelemetry, sizeof(I2CPacket)); 
 }
 
 void receiveEvent(int howMany) {

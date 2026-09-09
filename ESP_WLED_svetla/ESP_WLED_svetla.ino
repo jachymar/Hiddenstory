@@ -7,8 +7,10 @@
 // --- BLE NASTAVENÍ ---
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define STATE_CHARACTERISTIC_UUID "c4d2a8aa-7c45-4e4f-a999-f7dffb74c1a2"
 
 BLEServer* pServer = NULL;
+BLECharacteristic* pStateCharacteristic = NULL;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 bool cekaNaReklamu = false;
@@ -50,7 +52,11 @@ String vytvorJson(int r, int g, int b, int jas, int tt, int fx = 102) {
          ",\"seg\":[{\"id\":0,\"fx\":" + String(fx) + ",\"sx\":96,\"ix\":224,\"col\":[[" + 
          String(r) + "," + String(g) + "," + String(b) + "]]}]}";
 }
-
+void posliStateNaBle(String json) {
+  if (pStateCharacteristic == NULL) return;
+  pStateCharacteristic->setValue(json.c_str());
+  pStateCharacteristic->notify();
+}
 void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
   // Ochrana před změnou barvy, pokud není herní mód (0) nebo to není globální překreslení
   if (s3 == 3) return; 
@@ -187,6 +193,13 @@ void setup() {
                                          BLECharacteristic::PROPERTY_WRITE
                                        );
   pCharacteristic->setCallbacks(new MyCallbacks());
+
+  pStateCharacteristic = pService->createCharacteristic(
+                            STATE_CHARACTERISTIC_UUID,
+                            BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+                          );
+  pStateCharacteristic->setValue("{}");
+
   pService->start();
   
   BLEAdvertising *pAdvertising = pServer->getAdvertising(); 
@@ -221,6 +234,12 @@ void loop() {
   if (Serial2.available()) {
     String msg = Serial2.readStringUntil('\n');
     msg.trim(); // Odstraní neviditelné znaky (entery)
+
+    if (msg.startsWith("STATE|")) {
+      String json = msg.substring(6);
+      posliStateNaBle(json);
+      return;
+    }
 
     if (msg.length() >= 2) {
       char prefix = msg.charAt(0);

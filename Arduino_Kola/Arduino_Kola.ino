@@ -27,6 +27,14 @@ bool aktivaceDokoncena = false;
 
 Servo servoAnalog;
 
+struct I2CPacket {
+  byte status;
+  byte d1;
+  byte d2;
+  byte d3;
+};
+I2CPacket myTelemetry = {0, 0, 0, 0};
+
 void setup() {
   Serial.begin(9600);
   Wire.begin(SLAVE_ADDR);
@@ -68,6 +76,12 @@ void loop() {
     analogServoVakci = false; 
     Serial.println("[SERVO 10] Analogove servo se vraci.");
   }
+
+  // Aktualizace telemetrie pro ESP32
+  myTelemetry.status = stavProESP;
+  myTelemetry.d1 = stavPinuAktivni[0] ? 1 : 0;
+  myTelemetry.d2 = stavPinuAktivni[1] ? 1 : 0;
+  myTelemetry.d3 = stavPinuAktivni[2] ? 1 : 0;
 }
 
 // Vyhlazení analogového signálu (Oversampling)
@@ -142,7 +156,7 @@ void receiveEvent(int howMany) {
 }
 
 void requestEvent() { 
-  Wire.write(stavProESP); 
+  Wire.write((byte*)&myTelemetry, sizeof(I2CPacket)); 
 }
 
 void aktivujAnalogServo(unsigned long ted) {
