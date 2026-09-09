@@ -87,7 +87,7 @@ String buildTelemetryState() {
   String json = "{";
   json += "\"mode\":" + String(posledniS6) + ",";
   json += "\"buttons\":{\"state\":" + String(posledniS3) + ",\"pressed\":" + String(dataTlacitka.d1) + ",\"lock\":" + String(dataTlacitka.d2) + "},";
-  json += "\"crystals\":{\"state\":" + String(posledniS8) + ",\"placed\":" + String(dataSvetla.d1) + ",\"ledOn\":" + String(dataSvetla.d2) + "},";
+  json += "\"crystals\":{\"state\":" + String(posledniS8) + ",\"pio\":" + String(dataSvetla.d1) + ",\"ledOn\":" + String(dataSvetla.d2) + "},";
   json += "\"laser\":{\"state\":" + String(fyzickeS6) + ",\"isOn\":" + String(dataLaser.d1) + ",\"ldr\":" + String(dataLaser.d3) + "},";
   json += "\"wheels\":{\"state\":" + String(dataKola.status) + ",\"a1\":" + String(dataKola.d1) + ",\"a2\":" + String(dataKola.d2) + ",\"a3\":" + String(dataKola.d3) + "},";
   json += "\"system\":{\"initialized\":" + String(inicializaceHotova ? 1 : 0) + "}";

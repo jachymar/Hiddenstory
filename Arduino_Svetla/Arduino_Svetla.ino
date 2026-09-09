@@ -46,6 +46,8 @@ unsigned long casStartuPauzy = 0;  // Hlídá pauzu mezi dozhasnutím a startem 
 
 // Proměnné pro OneWire (Krystaly)
 bool krystalySplneny = false;
+byte posledniOneWirePIO = 0xFF; // Uložení surové telemetrie z Lebky
+
 unsigned long casPoslednihoCteni1W = 0;
 bool externiAktivni = false;
 bool pripravenoKExterniActivaci = false; 
@@ -342,7 +344,7 @@ void loop() {
 
   // Aktualizace telemetrie pro ESP32
   myTelemetry.status = systemovyStav;
-  myTelemetry.d1 = krystalySplneny ? 1 : 0;
+  myTelemetry.d1 = posledniOneWirePIO; // Posíláme dál surová data o krystalech z Lebky
   myTelemetry.d2 = (byte)aktualniRozsvicena;
   myTelemetry.d3 = (byte)aktualniVypnuta;
 }
@@ -363,9 +365,13 @@ void ctiOneWire() {
     if (ds.reset()) {
       ds.skip(); ds.write(0xF0); ds.write(0x88); ds.write(0x00);
       byte pioStav = ds.read(); 
+      posledniOneWirePIO = pioStav; // Uložení celého stavu pro I2C paket
       if ((pioStav & 0x01) == 0) krystalySplneny = true;
       else krystalySplneny = false;
-    } else { krystalySplneny = false; }
+    } else { 
+      krystalySplneny = false; 
+      posledniOneWirePIO = 0xFF; 
+    }
   }
 }
 

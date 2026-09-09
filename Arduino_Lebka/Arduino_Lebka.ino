@@ -102,6 +102,17 @@ void loop() {
   // ZPOŽDĚNÍ ZNĚLKY: Pin 0 hlásí hotovo až ve stavu ODPOCET nebo dále
   ds2408.setPinState(0, (stavHry == ODPOCET || stavHry == ODEMYKANI) ? false : true);
 
+  // --- ONEWIRE TELEMETRIE ---
+  // Využíváme zbylé virtuální PIO piny DS2408 pro přenos stavu jednotlivých krystalů
+  // a stavu hry směrem k Arduino_Svetla, které je předá dál do ESP32.
+  ds2408.setPinState(2, krystalAktivni[0]);
+  ds2408.setPinState(3, krystalAktivni[1]);
+  ds2408.setPinState(4, krystalAktivni[2]);
+  
+  ds2408.setPinState(5, (stavHry == CEKANI_NA_KRYSTALY));
+  ds2408.setPinState(6, (stavHry == ODPOCET));
+  ds2408.setPinState(7, (stavHry == ODEMYKANI || stavHry == HOTOVO_CEKANI_NA_VYNDANI));
+
   // 3. LOGIKA AUTOMATU
   switch (stavHry) {
     case CEKANI_NA_KRYSTALY:
