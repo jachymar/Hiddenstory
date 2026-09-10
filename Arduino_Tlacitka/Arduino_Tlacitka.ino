@@ -1,7 +1,7 @@
 #include <Servo.h>
 #include <Wire.h>
 
-#define SLAVE_ADDR 3 // Adresa prvního Arduina
+#define SLAVE_ADDR 11 // Adresa prvního Arduina
 
 /* --- KONFIGURACE PINŮ A HESLA --- */
 const int tlacitka[] = {2, 3, 4, 5, 6};
@@ -9,10 +9,11 @@ const int pinServoZamek = 9;
 const int heslo[] = {2, 5, 3, 4}; 
 
 /* --- I2C STAVY --- */
-volatile byte stavProESP = 0; 
+volatile byte i2cStatus = 0; 
 unsigned long casZmenyI2C = 0;
 const unsigned long DOBA_STAVU = 1000;
-volatile bool prikazOtevritB = false; 
+volatile bool cmdOpenLock = false; 
+const char CMD_OPEN_LOCK = 'B';
 
 /* --- PROMĚNNÉ PRO ZÁMEK (Nezávislý Debounce) --- */
 int zadaneHeslo[4];
@@ -61,15 +62,15 @@ void loop() {
   unsigned long ted = millis();
 
   // Reset I2C stavu po 1 sekundě
-  if (stavProESP != 0 && (ted - casZmenyI2C > DOBA_STAVU)) {
-    stavProESP = 0;
+  if (i2cStatus != 0 && (ted - casZmenyI2C > DOBA_STAVU)) {
+    i2cStatus = 0;
   }
 
   // Příkaz z ESP32 k otevření
-  if (prikazOtevritB && !zamekVakci) { 
+  if (cmdOpenLock && !zamekVakci) { 
     Serial.println("[I2C] Prikaz k otevreni zamku!");
     otevriZamek(ted); 
-    prikazOtevritB = false; 
+    cmdOpenLock = false; 
   }
 
   handleButtons(ted);
@@ -82,7 +83,7 @@ void loop() {
   }
 
   // Aktualizace telemetrie pro ESP32
-  myTelemetry.status = stavProESP;
+  myTelemetry.status = i2cStatus;
   myTelemetry.lock_open = zamekVakci ? 1 : 0;
   myTelemetry.presses = (uint8_t)pocitadloStisku;
   unsigned long idle = ted - posledniAktivitaHesla;
@@ -126,7 +127,7 @@ void handleButtons(unsigned long ted) {
             otevriZamek(ted);
           } else {
             Serial.println("[VYSLEDEK] >>> HESLO NESPRAVNE <<<");
-            stavProESP = 1; casZmenyI2C = ted; 
+            i2cStatus = 1; casZmenyI2C = ted; 
           }
           pocitadloStisku = 0; 
         }
@@ -139,16 +140,16 @@ void handleButtons(unsigned long ted) {
 void receiveEvent(int howMany) {
   while (Wire.available()) {
     char c = Wire.read();
-    if (c == 'B') prikazOtevritB = true;
+    if (c == CMD_OPEN_LOCK) cmdOpenLock = true;
   }
 }
 
 void requestEvent() { 
-  Wire.write((byte*)&myTelemetry, sizeof(I2CPacket)); 
+  Wire.write((byte*)&myTelemetry, sizeof(DiagTlacitka)); 
 }
 
 void otevriZamek(unsigned long ted) {
-  stavProESP = 2; 
+  i2cStatus = 2; 
   casZmenyI2C = ted;
   servoZamek.write(150); 
   startServoZamek = ted; 

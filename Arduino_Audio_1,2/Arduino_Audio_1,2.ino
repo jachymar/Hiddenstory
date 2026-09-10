@@ -14,7 +14,11 @@
 #define PIN_DVERE       3     
 
 // --- I2C NASTAVENÍ ---
-#define I2C_ADRESA_ARDUINA 10
+#define I2C_ADRESA_ARDUINA 16
+
+const char CMD_PLAY_MAIN = '0';
+const char CMD_PLAY_VICTORY = 'K';
+const char CMD_STOP = '3';
 
 // Vytvoření objektu přehrávače
 Adafruit_VS1053_FilePlayer filePlayer = 
@@ -76,7 +80,7 @@ volatile bool pozadavekZastavitVse = false;
 volatile bool pozadavekHratKrystaly = false; // Vlajka pro 'K'
 
 // Paměť pro ignorování přechodu zpět ze stavu '1'
-volatile char posledniStavMasteru = '0'; 
+volatile char lastMasterCommand = '0'; 
 
 void setup() {
   Serial.begin(115200);
@@ -368,24 +372,24 @@ void prijemDatI2C(int pocetBytu) {
   while (Wire.available()) {
     char c = Wire.read(); 
     
-    if (c == '0') {
+    if (c == CMD_PLAY_MAIN) {
       // Zabráníme restartování hudby, pokud jsme se sem vrátili ze stavu '1'
-      if (posledniStavMasteru != '1') {
+      if (lastMasterCommand != '1') {
         pozadavekHrat0001 = true;
       }
-      posledniStavMasteru = '0';
+      lastMasterCommand = CMD_PLAY_MAIN;
       
     } else if (c == '1') {
-      posledniStavMasteru = '1';
+      lastMasterCommand = '1';
       // Samotný povel 1 (Lasery) je ignorován
       
-    } else if (c == '3') {
+    } else if (c == CMD_STOP) {
       pozadavekZastavitVse = true; 
-      posledniStavMasteru = '3';
+      lastMasterCommand = CMD_STOP;
       
-    } else if (c == 'K') {
+    } else if (c == CMD_PLAY_VICTORY) {
       pozadavekHratKrystaly = true;
-      posledniStavMasteru = 'K';
+      lastMasterCommand = CMD_PLAY_VICTORY;
     }
   }
 }

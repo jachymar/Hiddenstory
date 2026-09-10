@@ -1,6 +1,6 @@
 /*
  * Laserová závora - Arduino SLAVE
- * I2C adresa: 6
+ * I2C adresa: 13
  * Cooldown: 16s (tlačítka ignorována)
  * I2C Alert čas (stav 1): 17s
  * Threshold: 20
@@ -9,7 +9,7 @@
 
 #include <Wire.h>
 
-const byte I2C_SLAVE_ADDR = 6;
+const byte I2C_SLAVE_ADDR = 13;
 
 const int PIN_LASER = 9;   
 const int PIN_LDR = A0;    

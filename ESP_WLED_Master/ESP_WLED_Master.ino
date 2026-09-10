@@ -2,12 +2,12 @@
 #include <HardwareSerial.h>
 
 // --- I2C ADRESY ARDUIN ---
-const int ADDR_LASERY         = 6;  // Modul hlavní páčky a laserů
-const int ADDR_TLACITKA       = 3;  // Modul tlačítek pro barvy a schránky (B)
-const int ADDR_KOLA           = 4;  // Modul kol / analogů (C)
-const int ADDR_LEBKA          = 9;  // Modul pro načtení krystalů a schránku Lebka (A)
-const int ADDR_SVETLA         = 8;  // Modul Světla
-const int ADDR_AUDIO          = 10; // Modul pro zvuky a hudbu
+const int ADDR_TLACITKA       = 11; // Modul tlačítek pro barvy a schránky (B)
+const int ADDR_KOLA           = 12; // Modul kol / analogů (C)
+const int ADDR_LASER          = 13; // Modul hlavní páčky a laserů
+const int ADDR_SVETLA         = 14; // Modul Světla (kaskáda LED)
+const int ADDR_LEBKA          = 15; // Modul pro načtení krystalů a schránku Lebka (A)
+const int ADDR_AUDIO          = 16; // Modul pro zvuky a hudbu
 
 // --- TELEMETRIE ---
 struct DiagLebka {
@@ -57,13 +57,13 @@ DiagSvetla dataSvetla = {0,0,0,0,0};
 DiagLebka dataLebka = {0,0,0,0,0,0};
 
 // --- STAVOVÉ PROMĚNNÉ HERNÍ LOGIKY ---
-int posledniS6 = -1; // Režim: 0=Herní, 1=Vypnuto/Lasery, 3=Pracovní
-int posledniS3 = -1; // Tlačítka: 1=Červená, 2=Zelená, 0=Nic
-int posledniS8 = -1; // Krystaly: 2=Všechny krystaly uvnitř, 0=Nic
+int lastGameMode = -1; // Režim hry: 0=Herní, 1=Vypnuto/Lasery, 3=Pracovní
+int lastColorButton = -1; // Stisknuté tlačítko: 1=Červená, 2=Zelená, 0=Nic
+int lastCrystalsState = -1; // Krystaly: 2=Všechny krystaly uvnitř, 0=Nic
 
-int fyzickeS6 = -1;
-int fyzickeS3 = -1;
-int fyzickeS8 = -1;
+int physGameMode = -1;
+int physColorButton = -1;
+int physCrystalsState = -1;
 
 String posledniStateJson = "{}";
 unsigned long posledniStateSendMs = 0;
@@ -103,24 +103,24 @@ bool readI2CStruct(int adresa, T &data) {
 }
 
 // Zpracování hlavní systémové změny a informování Audia a Komunikační brány
-void zpracujZmenuS6(int stav) {
+void processGameModeChange(int mode) {
   // 1. Změna hudby podle nového stavu
-  char audioPrikaz = '0' + stav; 
-  if (stav == 0 && posledniS8 == 2) {
+  char audioPrikaz = '0' + mode; 
+  if (mode == 0 && lastCrystalsState == 2) {
     audioPrikaz = 'K'; // Výjimka: Návrat do hry, ale krystaly už tam jsou
   }
   posliPrikazI2C(ADDR_AUDIO, audioPrikaz);
 
   // 2. Odeslání pokynu do Komunikační brány (ESP32 č.1)
   // Prefix 'M' znamená, že se mění hlavní Mód
-  Serial2.println("M" + String(stav));
+  Serial2.println("M" + String(mode));
   
-  Serial.print("Logika: Režim změněn na "); Serial.println(stav);
+  Serial.print("Logika: Režim změněn na "); Serial.println(mode);
 }
 
 String buildTelemetryState() {
   String json = "{";
-  json += "\"mode\":" + String(posledniS6) + ",";
+  json += "\"mode\":" + String(lastGameMode) + ",";
   json += "\"lebka\":{\"st\":" + String(dataLebka.status) + ",\"c_mask\":" + String(dataLebka.crystals_mask) + ",\"k1\":" + String(dataLebka.k1_val) + ",\"k2\":" + String(dataLebka.k2_val) + ",\"k3\":" + String(dataLebka.k3_val) + ",\"lock\":" + String(dataLebka.lock_open) + "},";
   json += "\"svetla\":{\"st\":" + String(dataSvetla.status) + ",\"run\":" + String(dataSvetla.mode_running) + ",\"led\":" + String(dataSvetla.current_led) + ",\"m_idl\":" + String(dataSvetla.magnet_idle) + ",\"m_val\":" + String(dataSvetla.magnet_val) + "},";
   json += "\"tlacitka\":{\"st\":" + String(dataTlacitka.status) + ",\"lock\":" + String(dataTlacitka.lock_open) + ",\"prs\":" + String(dataTlacitka.presses) + ",\"idl\":" + String(dataTlacitka.idle_time) + "},";
@@ -171,9 +171,9 @@ void loop() {
       
       // Změna Módu (0, 1, 2, 3) z webové aplikace
       if (cmd >= '0' && cmd <= '3') {
-        int novyS6 = cmd - '0';
-        posledniS6 = novyS6;
-        zpracujZmenuS6(posledniS6);
+        int novyMod = cmd - '0';
+        lastGameMode = novyMod;
+        processGameModeChange(lastGameMode);
         Serial.print("Brana vnutila novy rezim: "); Serial.println(cmd);
       }
       // Povel pro tajnou schránku (A, B, C, D) z webové aplikace
@@ -181,27 +181,27 @@ void loop() {
         Serial.print("Brana žada otevreni schranky: "); Serial.println(cmd);
         if (cmd == 'A') posliPrikazI2C(ADDR_LEBKA, 'A');
         else if (cmd == 'B') posliPrikazI2C(ADDR_TLACITKA, 'B');
-        else if (cmd == 'C') posliPrikazI2C(ADDR_KOLA, 'C'); // Modul KOLA má příkaz C
+        else if (cmd == 'C') posliPrikazI2C(ADDR_KOLA, 'C');
         else if (cmd == 'D') Serial.println("POZOR: Oltar zatim nema I2C adresu!");
       }
     }
   }
 
   if (!inicializaceHotova && (ted - casStartu >= 7000)) {
-    if (readI2CStruct(ADDR_LASERY, dataLaser)) fyzickeS6 = dataLaser.status;
-    if (readI2CStruct(ADDR_TLACITKA, dataTlacitka)) fyzickeS3 = dataTlacitka.status;
-    if (readI2CStruct(ADDR_LEBKA, dataLebka)) fyzickeS8 = (dataLebka.crystals_mask == 7) ? 2 : 0;
+    if (readI2CStruct(ADDR_LASER, dataLaser)) physGameMode = dataLaser.status;
+    if (readI2CStruct(ADDR_TLACITKA, dataTlacitka)) physColorButton = dataTlacitka.status;
+    if (readI2CStruct(ADDR_LEBKA, dataLebka)) physCrystalsState = (dataLebka.crystals_mask == 7) ? 2 : 0;
     readI2CStruct(ADDR_KOLA, dataKola); 
     readI2CStruct(ADDR_SVETLA, dataSvetla);
     
-    posledniS6 = fyzickeS6; 
-    posledniS3 = fyzickeS3; 
-    posledniS8 = fyzickeS8;
+    lastGameMode = physGameMode; 
+    lastColorButton = physColorButton; 
+    lastCrystalsState = physCrystalsState;
     
-    // Oznámí stavy komunikační brány
-    zpracujZmenuS6(posledniS6);
-    Serial2.println("C" + String(posledniS3));
-    Serial2.println("K" + String(posledniS8));
+    // Oznámí stavy komunikační bráně
+    processGameModeChange(lastGameMode);
+    Serial2.println("C" + String(lastColorButton));
+    Serial2.println("K" + String(lastCrystalsState));
     
     inicializaceHotova = true;
     Serial.println("Kalibrace dokoncena, system bezi!");
@@ -213,26 +213,26 @@ void loop() {
   if (ted - posledniI2C_Lasery >= 30) {
     posledniI2C_Lasery = ted;
     
-    if (readI2CStruct(ADDR_LASERY, dataLaser)) {
+    if (readI2CStruct(ADDR_LASER, dataLaser)) {
       int s = dataLaser.status;
-      if (s != fyzickeS6) { 
-        int staryFyzickeS6 = fyzickeS6;
-        fyzickeS6 = s; 
+      if (s != physGameMode) { 
+        int staryPhysMode = physGameMode;
+        physGameMode = s; 
         
         bool ignoruj = false;
         
         // OCHRANA PRACOVNÍHO MÓDU PŘED LASERY
-        if (posledniS6 == 3) {
+        if (lastGameMode == 3) {
           if (s == 1) {
             ignoruj = true; 
-          } else if (s == 0 && staryFyzickeS6 == 1) {
+          } else if (s == 0 && staryPhysMode == 1) {
             ignoruj = true; 
           }
         }
 
         if (!ignoruj) {
-          posledniS6 = s; 
-          zpracujZmenuS6(s); 
+          lastGameMode = s; 
+          processGameModeChange(s); 
         }
       }
     }
@@ -243,19 +243,19 @@ void loop() {
     posledniI2C = ted;
 
     // Čteme je pouze, pokud nesvítí čistá tma z laserů (stav 1)
-    if (posledniS6 == 0 || posledniS6 == 2 || posledniS6 == 3) { 
+    if (lastGameMode == 0 || lastGameMode == 2 || lastGameMode == 3) { 
       bool zmenaTlacitek = false;
       bool zmenaLebky = false;
-      int s3 = fyzickeS3, s8 = fyzickeS8;
+      int s3 = physColorButton, s8 = physCrystalsState;
 
       if (readI2CStruct(ADDR_TLACITKA, dataTlacitka)) {
         int s = dataTlacitka.status;
-        if (s != fyzickeS3 && s != 3) { s3 = s; fyzickeS3 = s; zmenaTlacitek = true; }
+        if (s != physColorButton && s != 3) { s3 = s; physColorButton = s; zmenaTlacitek = true; }
       }
       
       if (readI2CStruct(ADDR_LEBKA, dataLebka)) {
         int s = (dataLebka.crystals_mask == 7) ? 2 : 0;
-        if (s != fyzickeS8) { s8 = s; fyzickeS8 = s; zmenaLebky = true; }
+        if (s != physCrystalsState) { s8 = s; physCrystalsState = s; zmenaLebky = true; }
       }
       
       readI2CStruct(ADDR_KOLA, dataKola);
@@ -263,25 +263,25 @@ void loop() {
       
       // Byla stisknuta nová kombinace barev
       if (zmenaTlacitek) {
-        posledniS3 = s3;
+        lastColorButton = s3;
         // Odešleme do komunikační brány s prefixem C (Colors)
-        Serial2.println("C" + String(posledniS3)); 
+        Serial2.println("C" + String(lastColorButton)); 
       }
       
       // Byly změněny krystaly v lebce
       if (zmenaLebky) {
         // Hudební odezva na krystaly (pouze v Herním módu)
-        if (posledniS6 == 0) {
-          if (s8 == 2 && posledniS8 != 2) {
+        if (lastGameMode == 0) {
+          if (s8 == 2 && lastCrystalsState != 2) {
             posliPrikazI2C(ADDR_AUDIO, 'K'); // Krystaly jsou tam, hraj výhru
-          } else if (s8 != 2 && posledniS8 == 2) {
+          } else if (s8 != 2 && lastCrystalsState == 2) {
             posliPrikazI2C(ADDR_AUDIO, '0'); // Vytaženy, vrať hru
           }
         }
         
-        posledniS8 = s8;
+        lastCrystalsState = s8;
         // Odešleme do komunikační brány s prefixem K (Krystaly)
-        Serial2.println("K" + String(posledniS8)); 
+        Serial2.println("K" + String(lastCrystalsState)); 
       }
     }
   }

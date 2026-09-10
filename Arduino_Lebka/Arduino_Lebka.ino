@@ -5,7 +5,7 @@
 const int ONEWIRE_PIN = 3; 
 OneWireHub hub(ONEWIRE_PIN);
 DS2408 ds2408(0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00); 
-const byte I2C_SLAVE_ADDR = 9;
+const byte I2C_SLAVE_ADDR = 15;
 
 struct DiagLebka {
   uint8_t status;
@@ -17,7 +17,8 @@ struct DiagLebka {
 } __attribute__((packed));
 DiagLebka myTelemetry = {0, 0, 0, 0, 0, 0};
 
-volatile bool prikazOtevrit = false;
+volatile bool cmdOpenLock = false;
+const char CMD_OPEN_LOCK = 'A';
 
 const int pinySenzoru[] = {A0, A1, A2};
 const int pinLED_PWM = 6;              
@@ -72,7 +73,7 @@ void requestEvent() {
 
 void receiveEvent(int howMany) {
   while (Wire.available()) {
-    if (Wire.read() == 'A') prikazOtevrit = true;
+    if (Wire.read() == CMD_OPEN_LOCK) cmdOpenLock = true;
   }
 }
 
@@ -81,12 +82,12 @@ void loop() {
   hub.poll();
 
   // 1. OBSLUHA OTEVŘENÍ (OD MASTERA)
-  if (prikazOtevrit && !oneWireAktivniPraveTed) {
+  if (cmdOpenLock && !oneWireAktivniPraveTed) {
     oneWireAktivniPraveTed = true;
     casStartuOneWire = ted;
     digitalWrite(pinZamek, HIGH);      
     digitalWrite(pinReleLebka, HIGH);  
-    prikazOtevrit = false; 
+    cmdOpenLock = false; 
   }
 
   if (oneWireAktivniPraveTed && (ted - casStartuOneWire >= dobaOtevreniOneWire)) {

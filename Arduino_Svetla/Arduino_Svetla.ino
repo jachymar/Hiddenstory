@@ -5,10 +5,6 @@ const int pocetSvetel = 4;
 int poradpinu[pocetSvetel] = {9, 6, 3, 5}; 
 const int pinSenzoru = A0;                
 
-// OneWire komunikace
-const int pinOneWire = 4; 
-OneWire ds(pinOneWire);
-
 /* --- ČASOVÁNÍ ANIMACE --- */
 const int preDelay = 2500;           // 2,5s předstih pro ESP32
 const int pauzaPredDalsimSvetlem = 400; // Krátká pauza před zapnutím dalšího světla (400ms)
@@ -17,9 +13,7 @@ const int dobaPlnehoSvitu = 5000;    // 5s společného svícení v DIM stavu (n
 const int jasDim = 15;               // Hodnota nízkého jasu ("skoro vypnuté")
 const unsigned long dobaSvituJedneLED = 1500; // Doba, po kterou svítí LED naplno
 
-/* --- ČASOVÁNÍ KRYSTALŮ A MAGNETU --- */
-const unsigned long ochrannaLhutaKrystaly = 7000; // 7s musí být krystaly OFF pro nový start
-const unsigned long maxDobaStavu2 = 12000;        // 12s limit pro odesílání stavu 2
+/* --- ČASOVÁNÍ MAGNETU --- */
 const unsigned long ochrannaLhuta = 800;          // 0,8s (800ms) v klidu pro reset magnetu
 
 /* --- AUTO-KALIBRACE MAGNETU --- */
@@ -34,24 +28,14 @@ int pocetVzorku = 0;
 unsigned long casPoslednihoVzorku = 0;
 
 /* --- PROMĚNNÉ PRO I2C A LEBKU --- */
-volatile byte systemovyStav = 0; 
-volatile bool prikazOtevritLebku = false; 
+volatile byte i2cStatus = 0; 
+const byte I2C_SLAVE_ADDR = 14;
 
 /* --- STAVOVÉ PROMĚNNÉ SYSTÉMU --- */
 bool cyklusBezi = false;
 bool pripravenoKActivaci = false;
 unsigned long casVstupuDoOkna = 0; 
 unsigned long casStartuPauzy = 0;  // Hlídá pauzu mezi dozhasnutím a startem další LED
-
-// Proměnné pro OneWire (Krystaly)
-bool krystalySplneny = false;
-byte posledniOneWirePIO = 0xFF; // Uložení surové telemetrie z Lebky
-
-unsigned long casPoslednihoCteni1W = 0;
-bool externiAktivni = false;
-bool pripravenoKExterniActivaci = false; 
-unsigned long casVypnutiKrystalu = 0;    
-unsigned long casStartuStavu2 = 0;
 
 unsigned long casAktivaceMagnetem = 0;
 unsigned long casStartuSekvence = 0;
@@ -89,7 +73,7 @@ void setup() {
   
   randomSeed(analogRead(1)); 
   
-  Wire.begin(8);
+  Wire.begin(I2C_SLAVE_ADDR);
   Wire.onRequest(requestEvent);
   Wire.onReceive(receiveEvent); 
   
@@ -118,41 +102,9 @@ void setup() {
 void loop() {
   unsigned long ted = millis();
   
-  // --- 0. OBSLUHA PŘÍKAZU LEBKA ---
-  if (prikazOtevritLebku) {
-    zapisOneWirePIO(0xFD); // Odeslání příkazu na otevření
-    prikazOtevritLebku = false;       
-  }
-
-  // --- 1. NEBLOKUJÍCÍ ČTENÍ ONEWIRE (Krystaly) ---
-  ctiOneWire();
-
-  // --- 2. LOGIKA KRYSTALŮ (STAV 2) S 7s POJISTKOU ---
-  if (!krystalySplneny) {
-    if (casVypnutiKrystalu == 0) casVypnutiKrystalu = ted;
-    if (ted - casVypnutiKrystalu >= ochrannaLhutaKrystaly) {
-      pripravenoKExterniActivaci = true; 
-    }
-  } else {
-    if (pripravenoKExterniActivaci && !cyklusBezi && !externiAktivni) {
-      externiAktivni = true;
-      pripravenoKExterniActivaci = false;
-      casStartuStavu2 = ted;
-      Serial.println(">>> STAV 2: Krystaly aktivovany.");
-    }
-    casVypnutiKrystalu = 0; 
-  }
-  
-  // Omezení trvání Stavu 2 na 12 sekund
-  if (externiAktivni && (ted - casStartuStavu2 > maxDobaStavu2)) {
-    externiAktivni = false;
-  }
-  
-  if (cyklusBezi) externiAktivni = false;
-
-  // --- 3. URČENÍ STAVU PRO I2C ---
-  if (cyklusBezi) systemovyStav = 1;
-  else systemovyStav = 0;
+  // --- 1. URČENÍ STAVU PRO I2C ---
+  if (cyklusBezi) i2cStatus = 1;
+  else i2cStatus = 0;
 
   // --- PRŮBĚŽNÁ AUTO-KALIBRACE (Průměr za poslední 2 minuty) ---
   // Každou sekundu zkusíme zapsat novou hodnotu
@@ -187,7 +139,7 @@ void loop() {
     Serial.print("Akt: "); Serial.print(h);
     Serial.print(" | Klid(prumer): "); Serial.print(klidovaHodnota);
     Serial.print(" | Odchylka: "); Serial.print(odchylka);
-    Serial.print(" | I2C Stav: "); Serial.println(systemovyStav);
+    Serial.print(" | I2C Stav: "); Serial.println(i2cStatus);
     casVypisu = ted;
   }
 
@@ -333,7 +285,7 @@ void loop() {
       bool hotovo = true;
       for(int i=0; i<pocetSvetel; i++) if(stavSvetla[i] != 0) hotovo = false;
       if (hotovo) {
-        cyklusBezi = false; systemovyStav = 0; casZacatkuSviceni = 0; casVstupuDoOkna = 0; 
+        cyklusBezi = false; i2cStatus = 0; casZacatkuSviceni = 0; casVstupuDoOkna = 0; 
         casStartuPauzy = 0;
         for(int i=0; i<pocetSvetel; i++) nastavUnikatniParametry(i);
       }
@@ -341,37 +293,11 @@ void loop() {
   }
 
   // Aktualizace telemetrie pro ESP32
-  myTelemetry.status = systemovyStav;
+  myTelemetry.status = i2cStatus;
   myTelemetry.mode_running = cyklusBezi ? 1 : 0;
   myTelemetry.current_led = (uint8_t)aktualniRozsvicena;
   myTelemetry.magnet_idle = klidovaHodnota;
   myTelemetry.magnet_val = h;
-}
-
-// --- FUNKCE PRO ZÁPIS NA ONEWIRE (Odeslání k Lebce) ---
-void zapisOneWirePIO(byte pioData) {
-  if (ds.reset()) {
-    ds.skip(); ds.write(0x5A); ds.write(pioData); ds.write(~pioData);
-    byte ack = ds.read(); 
-    if (ack == 0xAA) Serial.println("OneWire: Prikaz potvrzen (0xAA)");
-  }
-}
-
-// --- FUNKCE PRO ČTENÍ ONEWIRE (Stav krystalů z P0) ---
-void ctiOneWire() {
-  if (millis() - casPoslednihoCteni1W >= 500) {
-    casPoslednihoCteni1W = millis();
-    if (ds.reset()) {
-      ds.skip(); ds.write(0xF0); ds.write(0x88); ds.write(0x00);
-      byte pioStav = ds.read(); 
-      posledniOneWirePIO = pioStav; // Uložení celého stavu pro I2C paket
-      if ((pioStav & 0x01) == 0) krystalySplneny = true;
-      else krystalySplneny = false;
-    } else { 
-      krystalySplneny = false; 
-      posledniOneWirePIO = 0xFF; 
-    }
-  }
 }
 
 // --- I2C FUNKCE ---

@@ -1,7 +1,7 @@
 #include <Servo.h>
 #include <Wire.h>
 
-#define SLAVE_ADDR 4 // Adresa druhého Arduina (změněna z 3 na 4 kvůli konfliktům)
+#define SLAVE_ADDR 12 // Adresa druhého Arduina (Kola)
 
 /* --- KONFIGURACE PINŮ A HODNOT --- */
 const int pinServoAnalog = 10; 
@@ -12,10 +12,11 @@ const int referencniHodnoty[] = {528, 493, 497};
 const int THRESHOLD = 40; // Minimální změna nutná k aktivaci
 
 /* --- I2C STAVY --- */
-volatile byte stavProESP = 0; 
+volatile byte i2cStatus = 0; 
 unsigned long casZmenyI2C = 0;
 const unsigned long DOBA_STAVU = 1000;
-volatile bool prikazOtevritC = false; 
+volatile bool cmdOpenLock = false; 
+const char CMD_OPEN_LOCK = 'C';
 
 /* --- PROMĚNNÉ PRO ANALOGOVOU LOGIKU --- */
 bool stavPinuAktivni[3] = {false, false, false}; 
@@ -51,22 +52,22 @@ void setup() {
   Serial.println("- Pevná kalibrace: A1=528, A2=493, A3=497");
   Serial.println("- Threshold: Změna o 40 jednotek");
   Serial.println("- Aktivace: 1.5s | Reset: 1.0s");
-  Serial.println("- I2C Adresa: 4 | Čekám na příkaz 'C'");
+  Serial.println("- I2C Adresa: 12 | Čekám na příkaz 'C'");
 }
 
 void loop() {
   unsigned long ted = millis();
 
   // Reset I2C stavu po 1 sekundě
-  if (stavProESP != 0 && (ted - casZmenyI2C > DOBA_STAVU)) {
-    stavProESP = 0;
+  if (i2cStatus != 0 && (ted - casZmenyI2C > DOBA_STAVU)) {
+    i2cStatus = 0;
   }
 
   // Příkaz z ESP32 k otevření
-  if (prikazOtevritC && !analogServoVakci) { 
+  if (cmdOpenLock && !analogServoVakci) { 
     Serial.println("[I2C] Prikaz k aktivaci analogu!");
     aktivujAnalogServo(ted); 
-    prikazOtevritC = false; 
+    cmdOpenLock = false; 
   }
 
   handleAnalog(ted);
@@ -79,7 +80,7 @@ void loop() {
   }
 
   // Aktualizace telemetrie pro ESP32
-  myTelemetry.status = stavProESP;
+  myTelemetry.status = i2cStatus;
   myTelemetry.active_mask = (stavPinuAktivni[0] ? 1 : 0) | (stavPinuAktivni[1] ? 2 : 0) | (stavPinuAktivni[2] ? 4 : 0);
 }
 
@@ -153,7 +154,7 @@ void handleAnalog(unsigned long ted) {
 void receiveEvent(int howMany) {
   while (Wire.available()) {
     char c = Wire.read();
-    if (c == 'C') prikazOtevritC = true;
+    if (c == CMD_OPEN_LOCK) cmdOpenLock = true;
   }
 }
 
@@ -162,7 +163,7 @@ void requestEvent() {
 }
 
 void aktivujAnalogServo(unsigned long ted) {
-  stavProESP = 3; 
+  i2cStatus = 3; 
   casZmenyI2C = ted;
   servoAnalog.write(90); 
   startServoAnalog = ted;

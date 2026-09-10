@@ -33,9 +33,9 @@ const int druhyR = 0, druhyG = 157, druhyB = 255;  // Modrá (2. místnost)
 const int jasVysoky1 = 172, jasVysoky3 = 15;       
 const int jasNizky = 10, jasDruhyStandard = 5;    
 
-int posledniS6 = 0; // Režim: 0=Herní, 1=Vypnuto, 3=Pracovní
-int posledniS3 = 0; // Tlačítka: 1=Červená, 2=Zelená, 0=Nic
-int posledniS8 = 0; // Krystaly: 2=Modrá, 0=Nic
+int currentMode = 0; // Režim: 0=Herní, 1=Vypnuto, 3=Pracovní
+int currentColorBtn = 0; // Tlačítka: 1=Červená, 2=Zelená, 0=Nic
+int currentCrystalsState = 0; // Krystaly: 2=Modrá, 0=Nic
 
 String globalDiagnosticJson = "{}";
 
@@ -62,7 +62,7 @@ void posliStateNaBle(String json) {
 void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
   // Ochrana před změnou barvy, pokud není herní mód (0) nebo to není globální překreslení
   if (s3 == 3) return; 
-  if (!vsem && (posledniS6 == 3 || posledniS6 == 1)) return;
+  if (!vsem && (currentMode == 3 || currentMode == 1)) return;
 
   int r1, g1, b1, jas1, jas2, jas3;
   int tt13 = 8, tt2  = 8; 
@@ -115,7 +115,7 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
       jas2 = (s8 == 1) ? 3 : jasDruhyStandard;
       jas3 = (s8 == 1) ? jasNizky : jasVysoky3;
 
-      if (posledniS3 == 1 || posledniS3 == 2) {
+      if (currentColorBtn == 1 || currentColorBtn == 2) {
         tt13 = 15; 
         tt2 = 15;
       } else if (vsem || zmenaZ8) {
@@ -129,7 +129,7 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
   }
 }
 
-void zpracujZmenuS6(int stav) {
+void applyModeChange(int stav) {
   if (stav == 3) { 
     // Pracovní mód
     String servJsonFast = vytvorJson(servR, servG, servB, 255, 5, 0);
@@ -142,7 +142,7 @@ void zpracujZmenuS6(int stav) {
     for (int i = 0; i < 3; i++) posliPrikaz(wled_ips[i], "{\"on\":false,\"transition\":0}");
   } else {
     // Návrat do herního módu
-    aktualizujSystem(posledniS3, posledniS8, false, true);
+    aktualizujSystem(currentColorBtn, currentCrystalsState, false, true);
   }
 }
 
@@ -254,25 +254,25 @@ void loop() {
 
       if (prefix == 'M') {
         // M = Změna hlavního Módu (0, 1, 3)
-        if (posledniS6 != hodnota) {
-          posledniS6 = hodnota;
-          zpracujZmenuS6(posledniS6);
+        if (currentMode != hodnota) {
+          currentMode = hodnota;
+          applyModeChange(currentMode);
           Serial.print("Svetla: Zmenen mod na "); Serial.println(hodnota);
         }
       } 
       else if (prefix == 'C') {
         // C = Změna tlačítka barev (0, 1, 2)
-        if (posledniS3 != hodnota) {
-          posledniS3 = hodnota;
-          aktualizujSystem(posledniS3, posledniS8, false);
+        if (currentColorBtn != hodnota) {
+          currentColorBtn = hodnota;
+          aktualizujSystem(currentColorBtn, currentCrystalsState, false);
           Serial.print("Svetla: Barva tlacitka zmenena na "); Serial.println(hodnota);
         }
       } 
       else if (prefix == 'K') {
         // K = Změna krystalů (0, 1, 2)
-        if (posledniS8 != hodnota) {
-          posledniS8 = hodnota;
-          aktualizujSystem(posledniS3, posledniS8, true); // true = zmenaZ8 pro lepsi prechod
+        if (currentCrystalsState != hodnota) {
+          currentCrystalsState = hodnota;
+          aktualizujSystem(currentColorBtn, currentCrystalsState, true); // true = zmenaZ8 pro lepsi prechod
           Serial.print("Svetla: Stav krystalu zmenen na "); Serial.println(hodnota);
         }
       }
