@@ -35,13 +35,14 @@ volatile byte i2cStatus = 0;
 byte lastStatusPrint = 255;
 int ldrValue = 0;
 
-struct I2CPacket {
-  byte status;
-  byte d1;
-  byte d2;
-  byte d3;
-};
-I2CPacket myTelemetry = {0, 0, 0, 0};
+struct DiagLaser {
+  uint8_t status;
+  uint8_t laser_on;
+  uint16_t ldr_val;
+  uint8_t fails;
+  uint8_t override_btn;
+} __attribute__((packed));
+DiagLaser myTelemetry = {0, 0, 0, 0, 0};
 
 void setup() {
   pinMode(PIN_LASER, OUTPUT);
@@ -68,9 +69,10 @@ void loop() {
 
   // Aktualizace telemetrie pro ESP32
   myTelemetry.status = i2cStatus;
-  myTelemetry.d1 = laserIsOn ? 1 : 0;
-  myTelemetry.d2 = alignmentMode ? 1 : 0;
-  myTelemetry.d3 = (ldrValue > 255) ? 255 : (byte)ldrValue;
+  myTelemetry.laser_on = laserIsOn ? 1 : 0;
+  myTelemetry.ldr_val = ldrValue;
+  myTelemetry.fails = failCounter;
+  myTelemetry.override_btn = switchActive ? 1 : 0;
 
   // --- LOGIKA PÁČKY (Stav 3) ---
   if (switchActive) {
@@ -148,7 +150,7 @@ void loop() {
 }
 
 void requestEvent() {
-  Wire.write((byte*)&myTelemetry, sizeof(I2CPacket)); 
+  Wire.write((byte*)&myTelemetry, sizeof(DiagLaser)); 
 }
 
 void checkStatusPrint() {

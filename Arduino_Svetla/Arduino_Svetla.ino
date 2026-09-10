@@ -1,5 +1,4 @@
 #include <Wire.h>
-#include <OneWire.h>
 
 /* --- KONFIGURACE PINŮ --- */
 const int pocetSvetel = 4;
@@ -70,13 +69,14 @@ bool vsechnaRozsvicena = false;
 unsigned long casStartuFaze[pocetSvetel] = {0, 0, 0, 0}; 
 int delkaZazehu[pocetSvetel], silaKolisani[pocetSvetel], rychlostNabehu[pocetSvetel];
 
-struct I2CPacket {
-  byte status;
-  byte d1;
-  byte d2;
-  byte d3;
-};
-I2CPacket myTelemetry = {0, 0, 0, 0};
+struct DiagSvetla {
+  uint8_t status;
+  uint8_t mode_running;
+  uint8_t current_led;
+  uint16_t magnet_idle;
+  uint16_t magnet_val;
+} __attribute__((packed));
+DiagSvetla myTelemetry = {0, 0, 0, 0, 0};
 
 void setup() {
   Serial.begin(115200); 
@@ -152,7 +152,6 @@ void loop() {
 
   // --- 3. URČENÍ STAVU PRO I2C ---
   if (cyklusBezi) systemovyStav = 1;
-  else if (externiAktivni) systemovyStav = 2;
   else systemovyStav = 0;
 
   // --- PRŮBĚŽNÁ AUTO-KALIBRACE (Průměr za poslední 2 minuty) ---
@@ -188,7 +187,6 @@ void loop() {
     Serial.print("Akt: "); Serial.print(h);
     Serial.print(" | Klid(prumer): "); Serial.print(klidovaHodnota);
     Serial.print(" | Odchylka: "); Serial.print(odchylka);
-    Serial.print(" | Krystaly 1W: "); Serial.print(krystalySplneny ? "ON" : "OFF");
     Serial.print(" | I2C Stav: "); Serial.println(systemovyStav);
     casVypisu = ted;
   }
@@ -344,9 +342,10 @@ void loop() {
 
   // Aktualizace telemetrie pro ESP32
   myTelemetry.status = systemovyStav;
-  myTelemetry.d1 = posledniOneWirePIO; // Posíláme dál surová data o krystalech z Lebky
-  myTelemetry.d2 = (byte)aktualniRozsvicena;
-  myTelemetry.d3 = (byte)aktualniVypnuta;
+  myTelemetry.mode_running = cyklusBezi ? 1 : 0;
+  myTelemetry.current_led = (uint8_t)aktualniRozsvicena;
+  myTelemetry.magnet_idle = klidovaHodnota;
+  myTelemetry.magnet_val = h;
 }
 
 // --- FUNKCE PRO ZÁPIS NA ONEWIRE (Odeslání k Lebce) ---
@@ -377,13 +376,12 @@ void ctiOneWire() {
 
 // --- I2C FUNKCE ---
 void requestEvent() { 
-  Wire.write((byte*)&myTelemetry, sizeof(I2CPacket)); 
+  Wire.write((byte*)&myTelemetry, sizeof(DiagSvetla)); 
 }
 
 void receiveEvent(int howMany) {
   while (Wire.available()) {
-    char c = Wire.read(); 
-    if (c == 'A') prikazOtevritLebku = true;
+    Wire.read(); 
   }
 }
 

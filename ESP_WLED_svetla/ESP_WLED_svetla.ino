@@ -37,6 +37,8 @@ int posledniS6 = 0; // Režim: 0=Herní, 1=Vypnuto, 3=Pracovní
 int posledniS3 = 0; // Tlačítka: 1=Červená, 2=Zelená, 0=Nic
 int posledniS8 = 0; // Krystaly: 2=Modrá, 0=Nic
 
+String globalDiagnosticJson = "{}";
+
 void posliPrikaz(const char* ip, String json) {
   HTTPClient http;
   http.setTimeout(150); 
@@ -234,6 +236,11 @@ void loop() {
   if (Serial2.available()) {
     String msg = Serial2.readStringUntil('\n');
     msg.trim(); // Odstraní neviditelné znaky (entery)
+
+    if (msg.startsWith("DIAG|")) {
+      globalDiagnosticJson = msg.substring(5);
+      return;
+    }
 
     if (msg.startsWith("STATE|")) {
       String json = msg.substring(6);

@@ -27,13 +27,14 @@ bool aktivaceDokoncena = false;
 
 Servo servoAnalog;
 
-struct I2CPacket {
-  byte status;
-  byte d1;
-  byte d2;
-  byte d3;
-};
-I2CPacket myTelemetry = {0, 0, 0, 0};
+struct DiagKola {
+  uint8_t status;
+  uint8_t active_mask;
+  uint16_t a1_val;
+  uint16_t a2_val;
+  uint16_t a3_val;
+} __attribute__((packed));
+DiagKola myTelemetry = {0, 0, 0, 0, 0};
 
 void setup() {
   Serial.begin(9600);
@@ -79,9 +80,7 @@ void loop() {
 
   // Aktualizace telemetrie pro ESP32
   myTelemetry.status = stavProESP;
-  myTelemetry.d1 = stavPinuAktivni[0] ? 1 : 0;
-  myTelemetry.d2 = stavPinuAktivni[1] ? 1 : 0;
-  myTelemetry.d3 = stavPinuAktivni[2] ? 1 : 0;
+  myTelemetry.active_mask = (stavPinuAktivni[0] ? 1 : 0) | (stavPinuAktivni[1] ? 2 : 0) | (stavPinuAktivni[2] ? 4 : 0);
 }
 
 // Vyhlazení analogového signálu (Oversampling)
@@ -98,6 +97,9 @@ void handleAnalog(unsigned long ted) {
 
   for (int i = 0; i < 3; i++) {
     int hodnota = getSmoothedAnalog(analogPiny[i]);
+    if(i==0) myTelemetry.a1_val = hodnota;
+    if(i==1) myTelemetry.a2_val = hodnota;
+    if(i==2) myTelemetry.a3_val = hodnota;
     
     // Výpočet absolutní odchylky od tvé pevné kalibrační hodnoty
     int odchylka = abs(hodnota - referencniHodnoty[i]);
@@ -156,7 +158,7 @@ void receiveEvent(int howMany) {
 }
 
 void requestEvent() { 
-  Wire.write((byte*)&myTelemetry, sizeof(I2CPacket)); 
+  Wire.write((byte*)&myTelemetry, sizeof(DiagKola)); 
 }
 
 void aktivujAnalogServo(unsigned long ted) {

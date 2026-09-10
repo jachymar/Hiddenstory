@@ -28,13 +28,13 @@ bool zamekVakci = false;
 
 Servo servoZamek;
 
-struct I2CPacket {
-  byte status;
-  byte d1;
-  byte d2;
-  byte d3;
-};
-I2CPacket myTelemetry = {0, 0, 0, 0};
+struct DiagTlacitka {
+  uint8_t status;
+  uint8_t lock_open;
+  uint8_t presses;
+  uint16_t idle_time;
+} __attribute__((packed));
+DiagTlacitka myTelemetry = {0, 0, 0, 0};
 
 void setup() {
   Serial.begin(9600);
@@ -83,9 +83,10 @@ void loop() {
 
   // Aktualizace telemetrie pro ESP32
   myTelemetry.status = stavProESP;
-  myTelemetry.d1 = (byte)pocitadloStisku;
-  myTelemetry.d2 = zamekVakci ? 1 : 0;
-  myTelemetry.d3 = 0;
+  myTelemetry.lock_open = zamekVakci ? 1 : 0;
+  myTelemetry.presses = (uint8_t)pocitadloStisku;
+  unsigned long idle = ted - posledniAktivitaHesla;
+  myTelemetry.idle_time = (idle > 65535) ? 65535 : (uint16_t)idle;
 }
 
 void handleButtons(unsigned long ted) {

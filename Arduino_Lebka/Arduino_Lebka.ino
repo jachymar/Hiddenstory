@@ -1,9 +1,23 @@
 #include <OneWireHub.h>
 #include <DS2408.h>
+#include <Wire.h>
 
 const int ONEWIRE_PIN = 3; 
 OneWireHub hub(ONEWIRE_PIN);
 DS2408 ds2408(0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00); 
+const byte I2C_SLAVE_ADDR = 9;
+
+struct DiagLebka {
+  uint8_t status;
+  uint8_t crystals_mask;
+  uint16_t k1_val;
+  uint16_t k2_val;
+  uint16_t k3_val;
+  uint8_t lock_open;
+} __attribute__((packed));
+DiagLebka myTelemetry = {0, 0, 0, 0, 0, 0};
+
+volatile bool prikazOtevrit = false;
 
 const int pinySenzoru[] = {A0, A1, A2};
 const int pinLED_PWM = 6;              
@@ -47,22 +61,32 @@ void setup() {
   digitalWrite(pinZamek, LOW);
   digitalWrite(pinReleLebka, LOW);
 
-  hub.attach(ds2408);
-  ds2408.setPinState(0, true); 
-  ds2408.setPinState(1, true); 
+  Wire.begin(I2C_SLAVE_ADDR);
+  Wire.onRequest(requestEvent);
+  Wire.onReceive(receiveEvent);
+}
+
+void requestEvent() {
+  Wire.write((byte*)&myTelemetry, sizeof(DiagLebka));
+}
+
+void receiveEvent(int howMany) {
+  while (Wire.available()) {
+    if (Wire.read() == 'A') prikazOtevrit = true;
+  }
 }
 
 void loop() {
   unsigned long ted = millis();
   hub.poll();
 
-  // 1. OBSLUHA ONEWIRE (OD MASTERA)
-  if (ds2408.getPinState(1) == false && !oneWireAktivniPraveTed) {
+  // 1. OBSLUHA OTEVŘENÍ (OD MASTERA)
+  if (prikazOtevrit && !oneWireAktivniPraveTed) {
     oneWireAktivniPraveTed = true;
     casStartuOneWire = ted;
     digitalWrite(pinZamek, HIGH);      
     digitalWrite(pinReleLebka, HIGH);  
-    ds2408.setPinState(1, true); 
+    prikazOtevrit = false; 
   }
 
   if (oneWireAktivniPraveTed && (ted - casStartuOneWire >= dobaOtevreniOneWire)) {
@@ -101,7 +125,6 @@ void loop() {
 
   // ZPOŽDĚNÍ ZNĚLKY: Pin 0 hlásí hotovo až ve stavu ODPOCET nebo dále
   ds2408.setPinState(0, (stavHry == ODPOCET || stavHry == ODEMYKANI) ? false : true);
-
   // --- ONEWIRE TELEMETRIE ---
   // Využíváme zbylé virtuální PIO piny DS2408 pro přenos stavu jednotlivých krystalů
   // a stavu hry směrem k Arduino_Svetla, které je předá dál do ESP32.
@@ -169,4 +192,11 @@ void loop() {
     analogWrite(pinLED_PWM, jas);
     lastF = ted;
   }
+
+  myTelemetry.status = (uint8_t)stavHry;
+  myTelemetry.crystals_mask = (krystalAktivni[0] ? 1 : 0) | (krystalAktivni[1] ? 2 : 0) | (krystalAktivni[2] ? 4 : 0);
+  myTelemetry.k1_val = analogRead(pinySenzoru[0]);
+  myTelemetry.k2_val = analogRead(pinySenzoru[1]);
+  myTelemetry.k3_val = analogRead(pinySenzoru[2]);
+  myTelemetry.lock_open = (oneWireAktivniPraveTed || stavHry == ODEMYKANI) ? 1 : 0;
 }

@@ -5,21 +5,56 @@
 const int ADDR_LASERY         = 6;  // Modul hlavní páčky a laserů
 const int ADDR_TLACITKA       = 3;  // Modul tlačítek pro barvy a schránky (B)
 const int ADDR_KOLA           = 4;  // Modul kol / analogů (C)
-const int ADDR_SVETLA_LEBKA   = 8;  // Modul pro načtení krystalů a schránku Lebka (A)
+const int ADDR_LEBKA          = 9;  // Modul pro načtení krystalů a schránku Lebka (A)
+const int ADDR_SVETLA         = 8;  // Modul Světla
 const int ADDR_AUDIO          = 10; // Modul pro zvuky a hudbu
 
 // --- TELEMETRIE ---
-struct I2CPacket {
-  byte status;
-  byte d1;
-  byte d2;
-  byte d3;
-};
+struct DiagLebka {
+  uint8_t status;
+  uint8_t crystals_mask;
+  uint16_t k1_val;
+  uint16_t k2_val;
+  uint16_t k3_val;
+  uint8_t lock_open;
+} __attribute__((packed));
 
-I2CPacket dataLaser = {0,0,0,0};
-I2CPacket dataTlacitka = {0,0,0,0};
-I2CPacket dataKola = {0,0,0,0};
-I2CPacket dataSvetla = {0,0,0,0};
+struct DiagSvetla {
+  uint8_t status;
+  uint8_t mode_running;
+  uint8_t current_led;
+  uint16_t magnet_idle;
+  uint16_t magnet_val;
+} __attribute__((packed));
+
+struct DiagKola {
+  uint8_t status;
+  uint8_t active_mask;
+  uint16_t a1_val;
+  uint16_t a2_val;
+  uint16_t a3_val;
+} __attribute__((packed));
+
+struct DiagTlacitka {
+  uint8_t status;
+  uint8_t lock_open;
+  uint8_t presses;
+  uint16_t idle_time;
+} __attribute__((packed));
+
+struct DiagLaser {
+  uint8_t status;
+  uint8_t laser_on;
+  uint16_t ldr_val;
+  uint8_t fails;
+  uint8_t override_btn;
+} __attribute__((packed));
+
+DiagLaser dataLaser = {0,0,0,0,0};
+DiagTlacitka dataTlacitka = {0,0,0,0};
+DiagKola dataKola = {0,0,0,0,0};
+DiagSvetla dataSvetla = {0,0,0,0,0};
+DiagLebka dataLebka = {0,0,0,0,0,0};
 
 // --- STAVOVÉ PROMĚNNÉ HERNÍ LOGIKY ---
 int posledniS6 = -1; // Režim: 0=Herní, 1=Vypnuto/Lasery, 3=Pracovní
@@ -52,17 +87,17 @@ void posliPrikazI2C(int adresa, char prikaz) {
   }
 }
 
-// Funkce pro bezpečné vyčtení 4 bajtů z Arduina
-bool readTelemetry(int adresa, I2CPacket &packet) {
-  Wire.requestFrom(adresa, sizeof(I2CPacket));
-  if (Wire.available() == sizeof(I2CPacket)) {
-    packet.status = Wire.read();
-    packet.d1 = Wire.read();
-    packet.d2 = Wire.read();
-    packet.d3 = Wire.read();
+// Funkce pro bezpečné vyčtení struktury z Arduina
+template <typename T>
+bool readI2CStruct(int adresa, T &data) {
+  Wire.requestFrom((uint8_t)adresa, (uint8_t)sizeof(T));
+  if (Wire.available() == sizeof(T)) {
+    uint8_t* ptr = (uint8_t*)&data;
+    for (size_t i = 0; i < sizeof(T); i++) {
+      ptr[i] = Wire.read();
+    }
     return true;
   }
-  // Pokud nesouhlasí velikost, vyprázdníme buffer
   while (Wire.available()) Wire.read();
   return false;
 }
@@ -86,11 +121,11 @@ void zpracujZmenuS6(int stav) {
 String buildTelemetryState() {
   String json = "{";
   json += "\"mode\":" + String(posledniS6) + ",";
-  json += "\"buttons\":{\"state\":" + String(posledniS3) + ",\"pressed\":" + String(dataTlacitka.d1) + ",\"lock\":" + String(dataTlacitka.d2) + "},";
-  json += "\"crystals\":{\"state\":" + String(posledniS8) + ",\"pio\":" + String(dataSvetla.d1) + ",\"ledOn\":" + String(dataSvetla.d2) + "},";
-  json += "\"laser\":{\"state\":" + String(fyzickeS6) + ",\"isOn\":" + String(dataLaser.d1) + ",\"ldr\":" + String(dataLaser.d3) + "},";
-  json += "\"wheels\":{\"state\":" + String(dataKola.status) + ",\"a1\":" + String(dataKola.d1) + ",\"a2\":" + String(dataKola.d2) + ",\"a3\":" + String(dataKola.d3) + "},";
-  json += "\"system\":{\"initialized\":" + String(inicializaceHotova ? 1 : 0) + "}";
+  json += "\"lebka\":{\"st\":" + String(dataLebka.status) + ",\"c_mask\":" + String(dataLebka.crystals_mask) + ",\"k1\":" + String(dataLebka.k1_val) + ",\"k2\":" + String(dataLebka.k2_val) + ",\"k3\":" + String(dataLebka.k3_val) + ",\"lock\":" + String(dataLebka.lock_open) + "},";
+  json += "\"svetla\":{\"st\":" + String(dataSvetla.status) + ",\"run\":" + String(dataSvetla.mode_running) + ",\"led\":" + String(dataSvetla.current_led) + ",\"m_idl\":" + String(dataSvetla.magnet_idle) + ",\"m_val\":" + String(dataSvetla.magnet_val) + "},";
+  json += "\"tlacitka\":{\"st\":" + String(dataTlacitka.status) + ",\"lock\":" + String(dataTlacitka.lock_open) + ",\"prs\":" + String(dataTlacitka.presses) + ",\"idl\":" + String(dataTlacitka.idle_time) + "},";
+  json += "\"kola\":{\"st\":" + String(dataKola.status) + ",\"mask\":" + String(dataKola.active_mask) + ",\"a1\":" + String(dataKola.a1_val) + ",\"a2\":" + String(dataKola.a2_val) + ",\"a3\":" + String(dataKola.a3_val) + "},";
+  json += "\"laser\":{\"st\":" + String(dataLaser.status) + ",\"on\":" + String(dataLaser.laser_on) + ",\"ldr\":" + String(dataLaser.ldr_val) + ",\"fail\":" + String(dataLaser.fails) + ",\"ovr\":" + String(dataLaser.override_btn) + "}";
   json += "}";
   return json;
 }
@@ -101,7 +136,7 @@ void posliTelemetryState(unsigned long ted) {
   String json = buildTelemetryState();
   if (json != posledniStateJson) {
     posledniStateJson = json;
-    Serial2.println("STATE|" + json);
+    Serial2.println("DIAG|" + json);
   }
 
   posledniStateSendMs = ted;
@@ -144,7 +179,7 @@ void loop() {
       // Povel pro tajnou schránku (A, B, C, D) z webové aplikace
       else if (cmd >= 'A' && cmd <= 'D') {
         Serial.print("Brana žada otevreni schranky: "); Serial.println(cmd);
-        if (cmd == 'A') posliPrikazI2C(ADDR_SVETLA_LEBKA, 'A');
+        if (cmd == 'A') posliPrikazI2C(ADDR_LEBKA, 'A');
         else if (cmd == 'B') posliPrikazI2C(ADDR_TLACITKA, 'B');
         else if (cmd == 'C') posliPrikazI2C(ADDR_KOLA, 'C'); // Modul KOLA má příkaz C
         else if (cmd == 'D') Serial.println("POZOR: Oltar zatim nema I2C adresu!");
@@ -153,16 +188,17 @@ void loop() {
   }
 
   if (!inicializaceHotova && (ted - casStartu >= 7000)) {
-    if (readTelemetry(ADDR_LASERY, dataLaser)) fyzickeS6 = dataLaser.status;
-    if (readTelemetry(ADDR_TLACITKA, dataTlacitka)) fyzickeS3 = dataTlacitka.status;
-    if (readTelemetry(ADDR_SVETLA_LEBKA, dataSvetla)) fyzickeS8 = dataSvetla.status;
-    readTelemetry(ADDR_KOLA, dataKola); // Kola se zatím používají jen pro data
+    if (readI2CStruct(ADDR_LASERY, dataLaser)) fyzickeS6 = dataLaser.status;
+    if (readI2CStruct(ADDR_TLACITKA, dataTlacitka)) fyzickeS3 = dataTlacitka.status;
+    if (readI2CStruct(ADDR_LEBKA, dataLebka)) fyzickeS8 = (dataLebka.crystals_mask == 7) ? 2 : 0;
+    readI2CStruct(ADDR_KOLA, dataKola); 
+    readI2CStruct(ADDR_SVETLA, dataSvetla);
     
     posledniS6 = fyzickeS6; 
     posledniS3 = fyzickeS3; 
     posledniS8 = fyzickeS8;
     
-    // Oznámí stavy komunikační bráně
+    // Oznámí stavy komunikační brány
     zpracujZmenuS6(posledniS6);
     Serial2.println("C" + String(posledniS3));
     Serial2.println("K" + String(posledniS8));
@@ -177,7 +213,7 @@ void loop() {
   if (ted - posledniI2C_Lasery >= 30) {
     posledniI2C_Lasery = ted;
     
-    if (readTelemetry(ADDR_LASERY, dataLaser)) {
+    if (readI2CStruct(ADDR_LASERY, dataLaser)) {
       int s = dataLaser.status;
       if (s != fyzickeS6) { 
         int staryFyzickeS6 = fyzickeS6;
@@ -212,18 +248,18 @@ void loop() {
       bool zmenaLebky = false;
       int s3 = fyzickeS3, s8 = fyzickeS8;
 
-      if (readTelemetry(ADDR_TLACITKA, dataTlacitka)) {
+      if (readI2CStruct(ADDR_TLACITKA, dataTlacitka)) {
         int s = dataTlacitka.status;
         if (s != fyzickeS3 && s != 3) { s3 = s; fyzickeS3 = s; zmenaTlacitek = true; }
       }
       
-      if (readTelemetry(ADDR_SVETLA_LEBKA, dataSvetla)) {
-        int s = dataSvetla.status;
+      if (readI2CStruct(ADDR_LEBKA, dataLebka)) {
+        int s = (dataLebka.crystals_mask == 7) ? 2 : 0;
         if (s != fyzickeS8) { s8 = s; fyzickeS8 = s; zmenaLebky = true; }
       }
       
-      // Měříme Kola pro telemetrii, Master zatím na jejich status jinak nereaguje
-      readTelemetry(ADDR_KOLA, dataKola);
+      readI2CStruct(ADDR_KOLA, dataKola);
+      readI2CStruct(ADDR_SVETLA, dataSvetla);
       
       // Byla stisknuta nová kombinace barev
       if (zmenaTlacitek) {
