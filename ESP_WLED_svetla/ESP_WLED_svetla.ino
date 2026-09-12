@@ -161,14 +161,12 @@ class MyCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
       String rxValue = pCharacteristic->getValue();
       if (rxValue.length() > 0) {
-        char cmd = rxValue[0];
-        
         // Cokoliv přijde z mobilu, okamžitě pošleme UARTem do "Hlavního Mozku" (ESP32 č.2)
-        // Mozek se pak sám rozhodne, co s tím udělá.
-        Serial2.println(cmd);
+        // Mozek se pak sám rozhodne, co s tím udělá. Posíláme celý řetězec.
+        Serial2.println(rxValue.c_str());
         
         Serial.print("BLE zprava odeslana do Mozku: ");
-        Serial.println(cmd);
+        Serial.println(rxValue.c_str());
       }
     }
 };
@@ -239,6 +237,7 @@ void loop() {
 
     if (msg.startsWith("DIAG|")) {
       globalDiagnosticJson = msg.substring(5);
+      posliStateNaBle(globalDiagnosticJson); // Notify the Web App
       return;
     }
 
@@ -275,6 +274,10 @@ void loop() {
           aktualizujSystem(currentColorBtn, currentCrystalsState, true); // true = zmenaZ8 pro lepsi prechod
           Serial.print("Svetla: Stav krystalu zmenen na "); Serial.println(hodnota);
         }
+      }
+      else if (prefix == 'X') {
+        // X = Developer Mod
+        Serial.print("Brana: Prepnut Dev Mod na "); Serial.println(hodnota);
       }
     }
   }

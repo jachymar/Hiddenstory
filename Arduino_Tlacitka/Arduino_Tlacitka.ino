@@ -14,6 +14,7 @@ unsigned long casZmenyI2C = 0;
 const unsigned long DOBA_STAVU = 1000;
 volatile bool cmdOpenLock = false; 
 const char CMD_OPEN_LOCK = 'B';
+volatile bool sendDetailed = false;
 
 /* --- PROMĚNNÉ PRO ZÁMEK (Nezávislý Debounce) --- */
 int zadaneHeslo[4];
@@ -139,13 +140,19 @@ void handleButtons(unsigned long ted) {
 // --- I2C FUNKCE ---
 void receiveEvent(int howMany) {
   while (Wire.available()) {
-    char c = Wire.read();
+    byte c = Wire.read();
     if (c == CMD_OPEN_LOCK) cmdOpenLock = true;
+    else if (c == 0x99) sendDetailed = true;
   }
 }
 
 void requestEvent() { 
-  Wire.write((byte*)&myTelemetry, sizeof(DiagTlacitka)); 
+  if (sendDetailed) {
+    Wire.write((byte*)&myTelemetry, sizeof(DiagTlacitka)); 
+    sendDetailed = false;
+  } else {
+    Wire.write(i2cStatus);
+  }
 }
 
 void otevriZamek(unsigned long ted) {

@@ -34,6 +34,7 @@ bool laserIsOn = false;
 volatile byte i2cStatus = 0;
 byte lastStatusPrint = 255;
 int ldrValue = 0;
+volatile bool sendDetailed = false;
 
 struct DiagLaser {
   uint8_t status;
@@ -52,6 +53,7 @@ void setup() {
   
   Wire.begin(I2C_SLAVE_ADDR);
   Wire.onRequest(requestEvent); 
+  Wire.onReceive(receiveEvent);
   
   Serial.begin(115200);
   Serial.println(F("--- SYSTEM AKTIVNI (Prechodny stav - Detekce vypnuta) ---"));
@@ -150,7 +152,19 @@ void loop() {
 }
 
 void requestEvent() {
-  Wire.write((byte*)&myTelemetry, sizeof(DiagLaser)); 
+  if (sendDetailed) {
+    Wire.write((byte*)&myTelemetry, sizeof(DiagLaser)); 
+    sendDetailed = false;
+  } else {
+    Wire.write(i2cStatus);
+  }
+}
+
+void receiveEvent(int howMany) {
+  while (Wire.available()) {
+    byte c = Wire.read();
+    if (c == 0x99) sendDetailed = true;
+  }
 }
 
 void checkStatusPrint() {

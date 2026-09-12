@@ -30,6 +30,7 @@ unsigned long casPoslednihoVzorku = 0;
 /* --- PROMĚNNÉ PRO I2C A LEBKU --- */
 volatile byte i2cStatus = 0; 
 const byte I2C_SLAVE_ADDR = 14;
+volatile bool sendDetailed = false;
 
 /* --- STAVOVÉ PROMĚNNÉ SYSTÉMU --- */
 bool cyklusBezi = false;
@@ -302,12 +303,18 @@ void loop() {
 
 // --- I2C FUNKCE ---
 void requestEvent() { 
-  Wire.write((byte*)&myTelemetry, sizeof(DiagSvetla)); 
+  if (sendDetailed) {
+    Wire.write((byte*)&myTelemetry, sizeof(DiagSvetla)); 
+    sendDetailed = false;
+  } else {
+    Wire.write(i2cStatus);
+  }
 }
 
 void receiveEvent(int howMany) {
   while (Wire.available()) {
-    Wire.read(); 
+    byte c = Wire.read(); 
+    if (c == 0x99) sendDetailed = true;
   }
 }
 

@@ -19,6 +19,7 @@ DiagLebka myTelemetry = {0, 0, 0, 0, 0, 0};
 
 volatile bool cmdOpenLock = false;
 const char CMD_OPEN_LOCK = 'A';
+volatile bool sendDetailed = false;
 
 const int pinySenzoru[] = {A0, A1, A2};
 const int pinLED_PWM = 6;              
@@ -68,12 +69,21 @@ void setup() {
 }
 
 void requestEvent() {
-  Wire.write((byte*)&myTelemetry, sizeof(DiagLebka));
+  if (sendDetailed) {
+    Wire.write((byte*)&myTelemetry, sizeof(DiagLebka));
+    sendDetailed = false;
+  } else {
+    // Basic odpoved 1 byte: 2 = všechny krystaly, 0 = nic
+    uint8_t basicState = (myTelemetry.crystals_mask == 7) ? 2 : 0;
+    Wire.write(basicState);
+  }
 }
 
 void receiveEvent(int howMany) {
   while (Wire.available()) {
-    if (Wire.read() == CMD_OPEN_LOCK) cmdOpenLock = true;
+    byte c = Wire.read();
+    if (c == CMD_OPEN_LOCK) cmdOpenLock = true;
+    else if (c == 0x99) sendDetailed = true;
   }
 }
 

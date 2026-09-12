@@ -1,0 +1,409 @@
+﻿<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Hidden Story</title>
+    <style>
+        :root {
+            --bg-color: #0f111a;
+            --panel-bg: #1e2130;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent-blue: #3b82f6;
+            --accent-blue-hover: #2563eb;
+            --accent-orange: #f59e0b;
+            --accent-orange-hover: #d97706;
+            --status-red: #ef4444;
+            --status-green: #10b981;
+            --border-color: #334155;
+        }
+
+        body {
+            margin: 0;
+            padding: 2rem 1rem;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+
+        .dashboard-container {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* HEADER */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 1rem;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 400;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .header h1 strong {
+            font-weight: 700;
+            color: var(--accent-orange);
+        }
+
+        /* STATUS BADGE */
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background-color: rgba(239, 68, 68, 0.1);
+            color: var(--status-red);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            transition: all 0.3s ease;
+        }
+
+        .status-indicator.connected {
+            background-color: rgba(16, 185, 129, 0.1);
+            color: var(--status-green);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: currentColor;
+        }
+
+        /* GRID LAYOUT */
+        .grid-layout {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+
+        @media (min-width: 768px) {
+            .grid-layout {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .span-full {
+                grid-column: 1 / -1;
+            }
+        }
+
+        /* CARDS */
+        .card {
+            background-color: var(--panel-bg);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .card h2 {
+            margin-top: 0;
+            margin-bottom: 1.2rem;
+            font-size: 1rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+        }
+
+        /* BUTTONS */
+        button {
+            width: 100%;
+            padding: 0.875rem 1.5rem;
+            border-radius: 8px;
+            border: none;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #fff;
+            margin-bottom: 0.75rem;
+        }
+
+        button:last-child {
+            margin-bottom: 0;
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        .btn-primary {
+            background-color: var(--accent-blue);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--accent-blue-hover);
+        }
+
+        .btn-outline {
+            background-color: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+        }
+
+        .btn-outline:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+            border-color: var(--text-muted);
+        }
+
+        .btn-warning {
+            background-color: rgba(245, 158, 11, 0.15);
+            color: var(--accent-orange);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .btn-warning:hover {
+            background-color: rgba(245, 158, 11, 0.25);
+        }
+
+        /* SUB-GRID FOR BUTTONS */
+        .btn-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+
+        .btn-grid button {
+            margin-bottom: 0;
+        }
+
+        /* TERMINAL / DIAGNOSTICS */
+        .terminal-container {
+            background-color: #050505;
+            border: 1px solid #222;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+            height: 250px;
+            overflow-y: auto;
+        }
+
+        .terminal-container pre {
+            margin: 0;
+            color: #22c55e;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* FOOTER & DEV LINK */
+        .footer {
+            margin-top: 2rem;
+            text-align: right;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .dev-link {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            opacity: 0.3;
+            transition: opacity 0.2s, color 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            user-select: none;
+        }
+
+        .dev-link:hover {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="dashboard-container">
+        
+        <header class="header">
+            <h1>Hidden Story <strong>Operator</strong></h1>
+            <div id="statusBadge" class="status-indicator">
+                <div class="status-dot"></div>
+                <span id="statusText">Odpojeno</span>
+            </div>
+        </header>
+
+        <div class="grid-layout">
+            
+            <!-- CONNECTION MODULE -->
+            <div class="card span-full">
+                <h2>Systémové Připojení</h2>
+                <button id="connectBtn" class="btn-primary">Připojit k řídící jednotce</button>
+            </div>
+
+            <!-- GAME MODES MODULE -->
+            <div class="card">
+                <h2>Herní Módy</h2>
+                <button class="btn-outline" onclick="sendCommand('0')">Standardní Hra</button>
+                <button class="btn-outline" onclick="sendCommand('3')">Pracovní Mód</button>
+            </div>
+
+            <!-- LOCKS MODULE -->
+            <div class="card">
+                <h2>Manuální Ovládání</h2>
+                <div class="btn-grid">
+                    <button class="btn-warning" style="color: var(--status-red);" onclick="sendCommand('A')">Lebka</button>
+                    <button class="btn-warning" onclick="sendCommand('B')">Tlačítka</button>
+                    <button class="btn-warning" onclick="sendCommand('C')">Kola</button>
+                    <button class="btn-warning" onclick="sendCommand('D')">Oltář</button>
+                </div>
+            </div>
+
+            <!-- DIAGNOSTICS MODULE (HIDDEN) -->
+            <div class="card span-full" id="diagPanel" style="display: none;">
+                <h2>Systémová Diagnostika</h2>
+                <div class="terminal-container">
+                    <pre id="diagOut">Inicializace diagnostického streamu...</pre>
+                </div>
+            </div>
+
+        </div>
+
+        <footer class="footer">
+            <span class="dev-link" onclick="toggleDevMode()">System Config</span>
+        </footer>
+
+    </div>
+
+    <script>
+        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+        const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+        const STATE_CHARACTERISTIC_UUID = "c4d2a8aa-7c45-4e4f-a999-f7dffb74c1a2";
+        
+        let bleDevice = null;
+        let bleServer = null;
+        let bleService = null;
+        let writeCharacteristic = null;
+        let stateCharacteristic = null;
+        let devMode = false;
+
+        const connectBtn = document.getElementById('connectBtn');
+        const statusBadge = document.getElementById('statusBadge');
+        const statusText = document.getElementById('statusText');
+        const diagPanel = document.getElementById('diagPanel');
+        const diagOut = document.getElementById('diagOut');
+        const devLink = document.querySelector('.dev-link');
+
+        connectBtn.addEventListener('click', async () => {
+            if (bleDevice && bleDevice.gatt.connected) {
+                bleDevice.gatt.disconnect();
+                return;
+            }
+
+            try {
+                console.log('Požadavek na Bluetooth zařízení...');
+                bleDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'ESP32_WLED' }],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+                statusText.textContent = 'Připojování...';
+
+                bleServer = await bleDevice.gatt.connect();
+                bleService = await bleServer.getPrimaryService(SERVICE_UUID);
+                writeCharacteristic = await bleService.getCharacteristic(CHARACTERISTIC_UUID);
+                stateCharacteristic = await bleService.getCharacteristic(STATE_CHARACTERISTIC_UUID);
+
+                await stateCharacteristic.startNotifications();
+                stateCharacteristic.addEventListener('characteristicvaluechanged', (e) => {
+                    let val = new TextDecoder().decode(e.target.value);
+                    if (devMode) {
+                        try {
+                            let js = JSON.parse(val);
+                            diagOut.textContent = JSON.stringify(js, null, 2);
+                        } catch(ex) {
+                            diagOut.textContent = val;
+                        }
+                    }
+                });
+
+                statusText.textContent = 'Připojeno';
+                statusBadge.classList.add('connected');
+                connectBtn.textContent = 'Odpojit systém';
+                connectBtn.style.backgroundColor = 'var(--status-red)';
+                
+            } catch (error) {
+                console.error('Chyba spojení:', error);
+                alert('Nepodařilo se připojit: ' + error);
+                onDisconnected();
+            }
+        });
+
+        function onDisconnected() {
+            statusText.textContent = 'Odpojeno';
+            statusBadge.classList.remove('connected');
+            connectBtn.textContent = 'Připojit k řídící jednotce';
+            connectBtn.style.backgroundColor = 'var(--accent-blue)';
+            bleDevice = null;
+            bleServer = null;
+            bleService = null;
+            writeCharacteristic = null;
+            stateCharacteristic = null;
+        }
+
+        function toggleDevMode() {
+            if (!devMode) {
+                let pwd = prompt("Zadejte přístupový kód (Developer Mode):");
+                if (pwd === "1234") {
+                    devMode = true;
+                    diagPanel.style.display = 'block';
+                    devLink.textContent = 'Disable System Config';
+                    devLink.style.color = 'var(--status-green)';
+                    devLink.style.opacity = '1';
+                    sendCommand('X1');
+                } else if (pwd !== null) {
+                    alert("Nesprávný přístupový kód.");
+                }
+            } else {
+                devMode = false;
+                diagPanel.style.display = 'none';
+                devLink.textContent = 'System Config';
+                devLink.style.color = 'var(--text-muted)';
+                devLink.style.opacity = '0.3';
+                sendCommand('X0');
+            }
+        }
+
+        async function sendCommand(cmd) {
+            if (!writeCharacteristic) {
+                alert('Systém není připojen!');
+                return;
+            }
+            try {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(cmd);
+                await writeCharacteristic.writeValue(data);
+                console.log('Odesláno:', cmd);
+            } catch (error) {
+                console.error('Chyba při odesílání:', error);
+                alert('Příkaz se nepodařilo odeslat.');
+            }
+        }
+    </script>
+</body>
+</html>
