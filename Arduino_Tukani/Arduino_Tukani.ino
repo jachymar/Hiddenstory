@@ -9,6 +9,38 @@ const unsigned long RESET_TIMEOUT_MS = 3000;  // Reset paměti po 3 s nečinnost
 const unsigned long LOCK_TIME_MS = 2000;      // Doba, po kterou zůstane výstup pin 8 aktivní
 const unsigned long BEEP_TIME_MS = 100;       // Délka jednorázového pípnutí
 
+#include <Wire.h>
+#define I2C_SLAVE_ADDR 20
+
+volatile bool sendDetailed = false;
+volatile byte i2cStatus = 0;
+volatile bool cmdOpenLock = false;
+
+struct DiagTukani {
+  uint8_t status;
+  uint8_t lock_open;
+  uint8_t taps;
+  uint8_t padding;
+} __attribute__((packed));
+DiagTukani myTelemetry = {0, 0, 0, 0};
+
+void requestEvent() {
+  if (sendDetailed) {
+    Wire.write((byte*)&myTelemetry, sizeof(DiagTukani));
+    sendDetailed = false;
+  } else {
+    Wire.write(i2cStatus);
+  }
+}
+
+void receiveEvent(int howMany) {
+  while (Wire.available()) {
+    byte c = Wire.read();
+    if (c == 0x99) sendDetailed = true;
+    else if (c == 'O') cmdOpenLock = true;
+  }
+}
+
 const float RATIO_TOLERANCE = 0.30;  // Tolerance +/- 30 % od očekávaného tempa
 
 // RYTMUS: 1200, 350, 350, 350, 1200 (5 intervalů = 6 ťuknutí)
@@ -37,6 +69,10 @@ void setup() {
   digitalWrite(OUTPUT_PIN, LOW);
   digitalWrite(STATUS_PIN, LOW);
 
+  Wire.begin(I2C_SLAVE_ADDR);
+  Wire.onRequest(requestEvent);
+  Wire.onReceive(receiveEvent);
+
   Serial.println("--- System Start (Kontinualni, Neblokujici rezim) ---");
   Serial.println("Posloucham... Kdykoliv vyklepej spravnou sekvenci.");
 }
@@ -54,6 +90,15 @@ void loop() {
     digitalWrite(OUTPUT_PIN, LOW);
     isUnlocked = false;
     resetRhythm();
+  }
+
+  // Zpracovani I2C povelu pro nucene otevreni
+  if (cmdOpenLock && !isUnlocked) {
+    cmdOpenLock = false;
+    Serial.println("\n🎉🎉🎉 I2C POVEL: Nucene otevreni!");
+    digitalWrite(OUTPUT_PIN, HIGH);
+    lockEndTime = currentMillis + LOCK_TIME_MS;
+    isUnlocked = true;
   }
 
   // 2. DETEKCE KLEPNUTÍ (jen na náběžné hraně)
@@ -77,6 +122,11 @@ void loop() {
     triggerBeep(BEEP_TIME_MS);
     resetRhythm();
   }
+
+  // Aktualizace telemetrie
+  myTelemetry.status = i2cStatus;
+  myTelemetry.lock_open = isUnlocked ? 1 : 0;
+  myTelemetry.taps = (uint8_t)intervalCount;
 }
 
 // --- HLAVNÍ KONTINUÁLNÍ LOGIKA ---

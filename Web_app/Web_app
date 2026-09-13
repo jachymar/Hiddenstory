@@ -269,6 +269,7 @@
                     <button class="btn-warning" onclick="sendCommand('B')">Tlačítka</button>
                     <button class="btn-warning" onclick="sendCommand('C')">Kola</button>
                     <button class="btn-warning" onclick="sendCommand('D')">Oltář</button>
+                    <button class="btn-warning" onclick="sendCommand('E')">Ťukání (M3)</button>
                 </div>
             </div>
 

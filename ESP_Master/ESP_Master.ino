@@ -1,5 +1,7 @@
 #include <Wire.h>
 #include <HardwareSerial.h>
+#include <WiFi.h>
+#include <esp_now.h>
 
 // --- I2C ADRESY ARDUIN ---
 const int ADDR_TLACITKA       = 11; // Modul tlačítek pro barvy a schránky (B)
@@ -8,6 +10,39 @@ const int ADDR_LASER          = 13; // Modul hlavní páčky a laserů
 const int ADDR_SVETLA         = 14; // Modul Světla (kaskáda LED)
 const int ADDR_LEBKA          = 15; // Modul pro načtení krystalů a schránku Lebka (A)
 const int ADDR_AUDIO          = 16; // Modul pro zvuky a hudbu
+
+// --- ESP-NOW STRUKTURY ---
+typedef struct struct_msg_to_m3 {
+  uint8_t target_i2c;
+  char command;
+} struct_msg_to_m3;
+
+typedef struct struct_msg_from_m3 {
+  uint8_t tukani_status;
+  uint8_t tukani_lock;
+  uint8_t tukani_taps;
+  uint8_t audio3_status;
+  uint8_t audio3_is_playing;
+  uint8_t audio3_is_alarm;
+} struct_msg_from_m3;
+
+struct_msg_from_m3 m3_data = {0,0,0,0,0,0};
+uint8_t addr_esp32_3[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // TODO: MAC ADRESA ESP32_3
+
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  if (len == sizeof(struct_msg_from_m3)) {
+    memcpy(&m3_data, incomingData, sizeof(m3_data));
+  }
+}
+
+void posliPrikazM3(uint8_t target_i2c, char cmd) {
+  struct_msg_to_m3 msg;
+  msg.target_i2c = target_i2c;
+  msg.command = cmd;
+  esp_now_send(addr_esp32_3, (uint8_t *) &msg, sizeof(msg));
+  Serial.print("ESP-NOW Odeslano '"); Serial.print(cmd); 
+  Serial.print("' na I2C "); Serial.println(target_i2c);
+}
 
 // --- TELEMETRIE ---
 struct DiagLebka {
@@ -141,7 +176,9 @@ String buildTelemetryState() {
   json += "\"svetla\":{\"st\":" + String(dataSvetla.status) + ",\"run\":" + String(dataSvetla.mode_running) + ",\"led\":" + String(dataSvetla.current_led) + ",\"m_idl\":" + String(dataSvetla.magnet_idle) + ",\"m_val\":" + String(dataSvetla.magnet_val) + "},";
   json += "\"tlacitka\":{\"st\":" + String(dataTlacitka.status) + ",\"lock\":" + String(dataTlacitka.lock_open) + ",\"prs\":" + String(dataTlacitka.presses) + ",\"idl\":" + String(dataTlacitka.idle_time) + "},";
   json += "\"kola\":{\"st\":" + String(dataKola.status) + ",\"mask\":" + String(dataKola.active_mask) + ",\"a1\":" + String(dataKola.a1_val) + ",\"a2\":" + String(dataKola.a2_val) + ",\"a3\":" + String(dataKola.a3_val) + "},";
-  json += "\"laser\":{\"st\":" + String(dataLaser.status) + ",\"on\":" + String(dataLaser.laser_on) + ",\"ldr\":" + String(dataLaser.ldr_val) + ",\"fail\":" + String(dataLaser.fails) + ",\"ovr\":" + String(dataLaser.override_btn) + "}";
+  json += "\"laser\":{\"st\":" + String(dataLaser.status) + ",\"on\":" + String(dataLaser.laser_on) + ",\"ldr\":" + String(dataLaser.ldr_val) + ",\"fail\":" + String(dataLaser.fails) + ",\"ovr\":" + String(dataLaser.override_btn) + "},";
+  json += "\"m3_tukani\":{\"st\":" + String(m3_data.tukani_status) + ",\"lock\":" + String(m3_data.tukani_lock) + ",\"taps\":" + String(m3_data.tukani_taps) + "},";
+  json += "\"m3_audio\":{\"st\":" + String(m3_data.audio3_status) + ",\"play\":" + String(m3_data.audio3_is_playing) + ",\"alarm\":" + String(m3_data.audio3_is_alarm) + "}";
   json += "}";
   return json;
 }
@@ -162,12 +199,27 @@ void setup() {
   // Debugování do počítače
   Serial.begin(115200);
   
-  // Komunikace s ESP32 č.1 (Komunikační bránou) přes Sériovou linku UART2
+  // Komunikace s ESP32 č.1 (Komunikační brány) přes Sériovou linku UART2
   // Piny RX=16, TX=17
   Serial2.begin(115200, SERIAL_8N1, 16, 17);
   
   // Inicializace I2C jako Master
   Wire.begin();
+  
+  // Inicializace ESP-NOW
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Chyba inicializace ESP-NOW");
+  } else {
+    esp_now_register_recv_cb(esp_now_recv_cb_t(OnDataRecv));
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, addr_esp32_3, 6);
+    peerInfo.channel = 0;  
+    peerInfo.encrypt = false;
+    if (esp_now_add_peer(&peerInfo) != ESP_OK){
+      Serial.println("Chyba pridani ESP-NOW peer");
+    }
+  }
   
   casStartu = millis();
   Serial.println("ESP32 (Hlavni Mozek) byl uspesne nastartovan!");
@@ -193,12 +245,13 @@ void loop() {
         Serial.print("Brana vnutila novy rezim: "); Serial.println(cmd);
       }
       // Povel pro tajnou schránku (A, B, C, D) z webové aplikace
-      else if (cmd >= 'A' && cmd <= 'D') {
+      else if (cmd >= 'A' && cmd <= 'E') {
         Serial.print("Brana žada otevreni schranky: "); Serial.println(cmd);
         if (cmd == 'A') posliPrikazI2C(ADDR_LEBKA, 'A');
         else if (cmd == 'B') posliPrikazI2C(ADDR_TLACITKA, 'B');
         else if (cmd == 'C') posliPrikazI2C(ADDR_KOLA, 'C');
         else if (cmd == 'D') Serial.println("POZOR: Oltar zatim nema I2C adresu!");
+        else if (cmd == 'E') posliPrikazM3(20, 'O');
       }
       // Developer Mód (X1 / X0)
       else if (cmd == 'X') {
@@ -259,13 +312,17 @@ void loop() {
       if (lastGameMode == 0 || lastGameMode == 2 || lastGameMode == 3) { 
         bool zmenaTlacitek = false;
         bool zmenaLebky = false;
-        uint8_t s3 = physColorButton, s8 = physCrystalsState;
+        int s3 = physColorButton, s8 = physCrystalsState;
 
-        uint8_t s = readI2CBasic(ADDR_TLACITKA);
-        if (s != 255 && s != physColorButton && s != 3) { s3 = s; physColorButton = s; zmenaTlacitek = true; }
+        if (readI2CDiagnostics(ADDR_TLACITKA, dataTlacitka)) {
+          int s = dataTlacitka.status;
+          if (s != physColorButton && s != 3) { s3 = s; physColorButton = s; zmenaTlacitek = true; }
+        }
         
-        s = readI2CBasic(ADDR_LEBKA);
-        if (s != 255 && s != physCrystalsState) { s8 = s; physCrystalsState = s; zmenaLebky = true; }
+        if (readI2CDiagnostics(ADDR_LEBKA, dataLebka)) {
+          int s = (dataLebka.crystals_mask == 7) ? 2 : 0;
+          if (s != physCrystalsState) { s8 = s; physCrystalsState = s; zmenaLebky = true; }
+        }
         
         if (zmenaTlacitek) {
           lastColorButton = s3;
@@ -323,9 +380,6 @@ void loop() {
           int s = (dataLebka.crystals_mask == 7) ? 2 : 0;
           if (s != physCrystalsState) { s8 = s; physCrystalsState = s; zmenaLebky = true; }
         }
-        
-        readI2CDiagnostics(ADDR_KOLA, dataKola);
-        readI2CDiagnostics(ADDR_SVETLA, dataSvetla);
         
         if (zmenaTlacitek) {
           lastColorButton = s3;

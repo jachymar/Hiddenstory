@@ -1,6 +1,38 @@
 #include <SPI.h>
 #include <SD.h> 
 #include <Adafruit_VS1053.h>
+#include <Wire.h>
+
+#define I2C_SLAVE_ADDR 21
+
+volatile bool sendDetailed = false;
+volatile byte i2cStatus = 0;
+volatile bool cmdStop = false;
+
+struct DiagAudio3 {
+  uint8_t status;
+  uint8_t is_playing;
+  uint8_t is_alarm_playing;
+  uint8_t padding;
+} __attribute__((packed));
+DiagAudio3 myTelemetry = {0, 0, 0, 0};
+
+void requestEvent() {
+  if (sendDetailed) {
+    Wire.write((byte*)&myTelemetry, sizeof(DiagAudio3));
+    sendDetailed = false;
+  } else {
+    Wire.write(i2cStatus);
+  }
+}
+
+void receiveEvent(int howMany) {
+  while (Wire.available()) {
+    byte c = Wire.read();
+    if (c == 0x99) sendDetailed = true;
+    else if (c == 'S') cmdStop = true;
+  }
+}
 
 // *** KONFIGURACE PINŮ PRO SHIELD ***
 #define VS1053_RESET    8     
@@ -65,10 +97,25 @@ void setup() {
   if (!SD.begin(CARD_CS)) { while (1); }
 
   filePlayer.setVolume(HLASITOST_HLAVNI, HLASITOST_HLAVNI);
+
+  Wire.begin(I2C_SLAVE_ADDR);
+  Wire.onRequest(requestEvent);
+  Wire.onReceive(receiveEvent);
+
   Serial.println(F("Ready. Alarm 0003.mp3 nelze po spuštění přerušit."));
 }
 
 void loop() {
+  // Aktualizace telemetrie pred returnem
+  myTelemetry.status = i2cStatus;
+  myTelemetry.is_playing = filePlayer.playingMusic ? 1 : 0;
+  myTelemetry.is_alarm_playing = isAlarmPlaying ? 1 : 0;
+  
+  if (cmdStop) {
+    cmdStop = false;
+    stopEverything(); // if isAlarmPlaying is true, stopEverything() will ignore it, which is correct
+  }
+
   // --- 0. NEZASTAVITELNÝ ALARM (BLOKOVÁNÍ SYSTÉMU) ---
   if (isAlarmPlaying) {
     if (filePlayer.playingMusic) {
@@ -151,4 +198,4 @@ void loop() {
   if (filePlayer.playingMusic && !isAlarmPlaying) {
     filePlayer.feedBuffer();
   }
-} 
+}
