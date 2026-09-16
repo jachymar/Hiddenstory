@@ -1,0 +1,5 @@
+{
+    "sketch": "ESP_Master.ino",
+    "board": "esp32:esp32:esp32",
+    "configuration": "PartitionScheme=huge_app"
+}

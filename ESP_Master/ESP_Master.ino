@@ -2,6 +2,21 @@
 #include <HardwareSerial.h>
 #include <WiFi.h>
 #include <esp_now.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+
+// --- BLE NASTAVENÍ ---
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define STATE_CHARACTERISTIC_UUID "c4d2a8aa-7c45-4e4f-a999-f7dffb74c1a2"
+
+BLEServer* pServer = NULL;
+BLECharacteristic* pStateCharacteristic = NULL;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+bool cekaNaReklamu = false;
+unsigned long casOdpojeni = 0;
 
 // --- I2C ADRESY ARDUIN ---
 const int ADDR_TLACITKA       = 11; // Modul tlačítek pro barvy a schránky (B)
@@ -189,11 +204,66 @@ void posliTelemetryState(unsigned long ted) {
   String json = buildTelemetryState();
   if (json != posledniStateJson) {
     posledniStateJson = json;
-    Serial2.println("DIAG|" + json);
+    if (pStateCharacteristic != NULL) {
+      pStateCharacteristic->setValue(json.c_str());
+      pStateCharacteristic->notify();
+    }
   }
 
   posledniStateSendMs = ted;
 }
+
+void processBleCommand(String msg) {
+  msg.trim();
+  if (msg.length() > 0) {
+    char cmd = msg.charAt(0);
+    
+    // Změna Módu (0, 1, 2, 3) z webové aplikace
+    if (cmd >= '0' && cmd <= '3') {
+      int novyMod = cmd - '0';
+      lastGameMode = novyMod;
+      processGameModeChange(lastGameMode);
+      Serial.print("Web vnutil novy rezim: "); Serial.println(cmd);
+    }
+    // Povel pro tajnou schránku (A, B, C, D, E) z webové aplikace
+    else if (cmd >= 'A' && cmd <= 'E') {
+      Serial.print("Web žada otevreni schranky: "); Serial.println(cmd);
+      if (cmd == 'A') posliPrikazI2C(ADDR_LEBKA, 'A');
+      else if (cmd == 'B') posliPrikazI2C(ADDR_TLACITKA, 'B');
+      else if (cmd == 'C') posliPrikazI2C(ADDR_KOLA, 'C');
+      else if (cmd == 'D') Serial.println("POZOR: Oltar zatim nema I2C adresu!");
+      else if (cmd == 'E') posliPrikazM3(20, 'O');
+    }
+    // Developer Mód (X1 / X0)
+    else if (cmd == 'X') {
+      int val = msg.substring(1).toInt();
+      devModeActive = (val == 1);
+      Serial.print("Master: Dev Mod nastaven na: "); Serial.println(devModeActive);
+      Serial2.println(msg); // Preposlat do WLED (pro zmenu jeho chovani, pokud by bylo treba)
+    }
+  }
+}
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+      Serial.println("BLE PŘIPOJENO.");
+    }
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+      Serial.println("BLE ODPOJENO.");
+    }
+};
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      String rxValue = pCharacteristic->getValue();
+      if (rxValue.length() > 0) {
+        Serial.print("BLE prijato: "); Serial.println(rxValue.c_str());
+        processBleCommand(rxValue.c_str());
+      }
+    }
+};
 
 void setup() {
   // Debugování do počítače
@@ -221,6 +291,33 @@ void setup() {
     }
   }
   
+  // BLE Inicializace
+  BLEDevice::init("ESP32_WLED_Mozek");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+                                         CHARACTERISTIC_UUID,
+                                         BLECharacteristic::PROPERTY_WRITE
+                                       );
+  pCharacteristic->setCallbacks(new MyCallbacks());
+
+  pStateCharacteristic = pService->createCharacteristic(
+                            STATE_CHARACTERISTIC_UUID,
+                            BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+                          );
+  pStateCharacteristic->setValue("{}");
+
+  pService->start();
+  
+  BLEAdvertising *pAdvertising = pServer->getAdvertising(); 
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06); 
+  pAdvertising->setMinPreferred(0x12);
+  pAdvertising->start();
+
   casStartu = millis();
   Serial.println("ESP32 (Hlavni Mozek) byl uspesne nastartovan!");
   Serial.println("Cekam 7 vterin na srovnani senzoru...");
@@ -229,37 +326,18 @@ void setup() {
 void loop() {
   unsigned long ted = millis();
 
-  // --- ZPRACOVÁNÍ PŘÍCHOZÍCH ZPRÁV Z KOMUNIKAČNÍ BRÁNY (PŘES BLUETOOTH) ---
-  if (Serial2.available()) {
-    String msg = Serial2.readStringUntil('\n');
-    msg.trim();
-    
-    if (msg.length() > 0) {
-      char cmd = msg.charAt(0);
-      
-      // Změna Módu (0, 1, 2, 3) z webové aplikace
-      if (cmd >= '0' && cmd <= '3') {
-        int novyMod = cmd - '0';
-        lastGameMode = novyMod;
-        processGameModeChange(lastGameMode);
-        Serial.print("Brana vnutila novy rezim: "); Serial.println(cmd);
-      }
-      // Povel pro tajnou schránku (A, B, C, D) z webové aplikace
-      else if (cmd >= 'A' && cmd <= 'E') {
-        Serial.print("Brana žada otevreni schranky: "); Serial.println(cmd);
-        if (cmd == 'A') posliPrikazI2C(ADDR_LEBKA, 'A');
-        else if (cmd == 'B') posliPrikazI2C(ADDR_TLACITKA, 'B');
-        else if (cmd == 'C') posliPrikazI2C(ADDR_KOLA, 'C');
-        else if (cmd == 'D') Serial.println("POZOR: Oltar zatim nema I2C adresu!");
-        else if (cmd == 'E') posliPrikazM3(20, 'O');
-      }
-      // Developer Mód (X1 / X0)
-      else if (cmd == 'X') {
-        int val = msg.substring(1).toInt();
-        devModeActive = (val == 1);
-        Serial.print("Master: Dev Mod nastaven na: "); Serial.println(devModeActive);
-      }
-    }
+  // BLE Opětovné připojení
+  if (!deviceConnected && oldDeviceConnected) {
+      casOdpojeni = ted;
+      cekaNaReklamu = true;
+      oldDeviceConnected = deviceConnected;
+  }
+  if (cekaNaReklamu && (ted - casOdpojeni > 500)) {
+      cekaNaReklamu = false;
+      pServer->getAdvertising()->start(); 
+  }
+  if (deviceConnected && !oldDeviceConnected) {
+      oldDeviceConnected = deviceConnected;
   }
 
   if (!inicializaceHotova && (ted - casStartu >= 7000)) {

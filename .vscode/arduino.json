@@ -1,6 +1,7 @@
 {
-    "sketch": "Arduino_Tlacitka/Arduino_Tlacitka.ino",
-    "port": "COM3",
-    "board": "arduino:avr:uno",
-    "output": "../build"
+    "board": "esp32:esp32:esp32",
+    "configuration": "PartitionScheme=huge_app,FlashMode=qio,FlashFreq=80,FlashSize=4M,UploadSpeed=921600,DebugLevel=none",
+    "output": "../build",
+    "port": "COM5",
+    "sketch": "ESP_Master/ESP_Master.ino"
 }

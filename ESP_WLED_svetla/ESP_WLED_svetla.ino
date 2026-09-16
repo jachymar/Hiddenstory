@@ -1,20 +1,5 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include <BLEDevice.h>
-#include <BLEUtils.h>
-#include <BLEServer.h>
-
-// --- BLE NASTAVENÍ ---
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-#define STATE_CHARACTERISTIC_UUID "c4d2a8aa-7c45-4e4f-a999-f7dffb74c1a2"
-
-BLEServer* pServer = NULL;
-BLECharacteristic* pStateCharacteristic = NULL;
-bool deviceConnected = false;
-bool oldDeviceConnected = false;
-bool cekaNaReklamu = false;
-unsigned long casOdpojeni = 0;
 
 // --- WLED NASTAVENÍ ---
 const char* ssid = "LED-AP";
@@ -37,8 +22,6 @@ int currentMode = 0; // Režim: 0=Herní, 1=Vypnuto, 3=Pracovní
 int currentColorBtn = 0; // Tlačítka: 1=Červená, 2=Zelená, 0=Nic
 int currentCrystalsState = 0; // Krystaly: 2=Modrá, 0=Nic
 
-String globalDiagnosticJson = "{}";
-
 void posliPrikaz(const char* ip, String json) {
   HTTPClient http;
   http.setTimeout(150); 
@@ -54,11 +37,7 @@ String vytvorJson(int r, int g, int b, int jas, int tt, int fx = 102) {
          ",\"seg\":[{\"id\":0,\"fx\":" + String(fx) + ",\"sx\":96,\"ix\":224,\"col\":[[" + 
          String(r) + "," + String(g) + "," + String(b) + "]]}]}";
 }
-void posliStateNaBle(String json) {
-  if (pStateCharacteristic == NULL) return;
-  pStateCharacteristic->setValue(json.c_str());
-  pStateCharacteristic->notify();
-}
+
 void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
   // Ochrana před změnou barvy, pokud není herní mód (0) nebo to není globální překreslení
   if (s3 == 3) return; 
@@ -150,27 +129,6 @@ class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
       Serial.println("BLE PŘIPOJENO.");
-    }
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-      Serial.println("BLE ODPOJENO.");
-    }
-};
-
-class MyCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      String rxValue = pCharacteristic->getValue();
-      if (rxValue.length() > 0) {
-        // Cokoliv přijde z mobilu, okamžitě pošleme UARTem do "Hlavního Mozku" (ESP32 č.2)
-        // Mozek se pak sám rozhodne, co s tím udělá. Posíláme celý řetězec.
-        Serial2.println(rxValue.c_str());
-        
-        Serial.print("BLE zprava odeslana do Mozku: ");
-        Serial.println(rxValue.c_str());
-      }
-    }
-};
-
 void setup() {
   Serial.begin(115200); // Debug do PC
   
@@ -182,74 +140,15 @@ void setup() {
   WiFi.softAPConfig(local_IP, gateway, subnet);
   WiFi.softAP(ssid, password);
   
-  // BLE Inicializace
-  BLEDevice::init("ESP32_WLED_Ovladac");
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
-
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
-                                         CHARACTERISTIC_UUID,
-                                         BLECharacteristic::PROPERTY_WRITE
-                                       );
-  pCharacteristic->setCallbacks(new MyCallbacks());
-
-  pStateCharacteristic = pService->createCharacteristic(
-                            STATE_CHARACTERISTIC_UUID,
-                            BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
-                          );
-  pStateCharacteristic->setValue("{}");
-
-  pService->start();
-  
-  BLEAdvertising *pAdvertising = pServer->getAdvertising(); 
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06); 
-  pAdvertising->setMinPreferred(0x12);
-  pAdvertising->start();
-
-  Serial.println("ESP32 Komunikacni Brana uspesne nastartovala.");
+  Serial.println("ESP32 WLED Kontroler uspesne nastartoval.");
 }
 
 void loop() {
-  unsigned long ted = millis();
-
-  // BLE Opětovné připojení
-  if (!deviceConnected && oldDeviceConnected) {
-      casOdpojeni = ted;
-      cekaNaReklamu = true;
-      oldDeviceConnected = deviceConnected;
-  }
-  if (cekaNaReklamu && (ted - casOdpojeni > 500)) {
-      cekaNaReklamu = false;
-      pServer->getAdvertising()->start(); 
-  }
-  if (deviceConnected && !oldDeviceConnected) {
-      oldDeviceConnected = deviceConnected;
-  }
-
   // PŘÍJEM POKYNŮ OD HLAVNÍHO MOZKU PŘES SERIAL2
   // Mozek posílá jednoduché textové příkazy (např. "M1" pro režim 1, "C2" pro barvu 2)
   if (Serial2.available()) {
     String msg = Serial2.readStringUntil('\n');
-    msg.trim(); // Odstraní neviditelné znaky (entery)
-
-    if (msg.startsWith("DIAG|")) {
-      globalDiagnosticJson = msg.substring(5);
-      posliStateNaBle(globalDiagnosticJson); // Notify the Web App
-      return;
-    }
-
-    if (msg.startsWith("STATE|")) {
-      String json = msg.substring(6);
-      posliStateNaBle(json);
-      return;
-    }
-
-    if (msg.length() >= 2) {
-      char prefix = msg.charAt(0);
-      int hodnota = msg.substring(1).toInt();
+    msg.trim(); // Odstraní neviditelné znaky (entery) int hodnota = msg.substring(1).toInt();
 
       if (prefix == 'M') {
         // M = Změna hlavního Módu (0, 1, 3)
@@ -281,4 +180,4 @@ void loop() {
       }
     }
   }
-}
+}Svetl
