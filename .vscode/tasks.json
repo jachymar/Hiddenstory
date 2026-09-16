@@ -1,0 +1,69 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Arduino: Upload Active File (UNO - COM3)",
+      "type": "process",
+      "command": "C:\\Program Files\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe",
+      "args": [
+        "compile",
+        "--upload",
+        "-p",
+        "COM3",
+        "--fqbn",
+        "arduino:avr:uno",
+        "${file}"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Arduino: Upload Active File (Nano Old Bootloader - COM3)",
+      "type": "process",
+      "command": "C:\\Program Files\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe",
+      "args": [
+        "compile",
+        "--upload",
+        "-p",
+        "COM3",
+        "--fqbn",
+        "arduino:avr:nano:cpu=atmega328old",
+        "${file}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Arduino: Upload Active File (Nano New Bootloader - COM3)",
+      "type": "process",
+      "command": "C:\\Program Files\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe",
+      "args": [
+        "compile",
+        "--upload",
+        "-p",
+        "COM3",
+        "--fqbn",
+        "arduino:avr:nano",
+        "${file}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Arduino: Upload Active File (ESP32 - COM3)",
+      "type": "process",
+      "command": "C:\\Program Files\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe",
+      "args": [
+        "compile",
+        "--upload",
+        "-p",
+        "COM3",
+        "--fqbn",
+        "esp32:esp32:esp32",
+        "${file}"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}
