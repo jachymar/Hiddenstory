@@ -6,7 +6,7 @@
     <title>Dashboard - Hidden Story</title>
     <style>
         :root {
-            --bg-color: #0f111a;
+            --bg-color: #141b38;
             --panel-bg: #1e2130;
             --text-main: #e2e8f0;
             --text-muted: #94a3b8;
@@ -107,6 +107,42 @@
             .span-full {
                 grid-column: 1 / -1;
             }
+        }
+
+        /* CONFIG MODULE */
+        .config-panel {
+            background-color: var(--panel-bg);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .config-panel label {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .config-panel input {
+            background-color: var(--bg-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 0.75rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .config-panel input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
         }
 
         /* CARDS */
@@ -248,12 +284,6 @@
 
         <div class="grid-layout">
             
-            <!-- CONNECTION MODULE -->
-            <div class="card span-full">
-                <h2>Systémové Připojení</h2>
-                <button id="connectBtn" class="btn-primary">Připojit k řídící jednotce</button>
-            </div>
-
             <!-- GAME MODES MODULE -->
             <div class="card">
                 <h2>Herní Módy</h2>
@@ -265,17 +295,20 @@
             <div class="card">
                 <h2>Manuální Ovládání</h2>
                 <div class="btn-grid">
-                    <button class="btn-warning" style="color: var(--status-red);" onclick="sendCommand('A')">Lebka</button>
+                    <button class="btn-warning" onclick="sendCommand('A')">Lebka</button>
                     <button class="btn-warning" onclick="sendCommand('B')">Tlačítka</button>
                     <button class="btn-warning" onclick="sendCommand('C')">Kola</button>
-                    <button class="btn-warning" onclick="sendCommand('D')">Oltář</button>
-                    <button class="btn-warning" onclick="sendCommand('E')">Ťukání (M3)</button>
+                    <button class="btn-warning" onclick="sendCommand('E')">Oltář (Ťukání)</button>
                 </div>
             </div>
 
             <!-- DIAGNOSTICS MODULE (HIDDEN) -->
             <div class="card span-full" id="diagPanel" style="display: none;">
                 <h2>Systémová Diagnostika</h2>
+                <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
+                    <label style="font-size: 0.8rem; color: var(--text-muted);">IP ESP32:</label>
+                    <input type="text" id="ipAddress" value="192.168.1.100" style="background: #111; border: 1px solid #333; color: #fff; padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">
+                </div>
                 <div class="terminal-container">
                     <pre id="diagOut">Inicializace diagnostického streamu...</pre>
                 </div>
@@ -290,82 +323,75 @@
     </div>
 
     <script>
-        const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-        const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-        const STATE_CHARACTERISTIC_UUID = "c4d2a8aa-7c45-4e4f-a999-f7dffb74c1a2";
-        
-        let bleDevice = null;
-        let bleServer = null;
-        let bleService = null;
-        let writeCharacteristic = null;
-        let stateCharacteristic = null;
+        const DEFAULT_IP = '192.168.0.100';
         let devMode = false;
+        let isConnected = false;
 
-        const connectBtn = document.getElementById('connectBtn');
         const statusBadge = document.getElementById('statusBadge');
         const statusText = document.getElementById('statusText');
         const diagPanel = document.getElementById('diagPanel');
         const diagOut = document.getElementById('diagOut');
         const devLink = document.querySelector('.dev-link');
+        const ipInput = document.getElementById('ipAddress');
 
-        connectBtn.addEventListener('click', async () => {
-            if (bleDevice && bleDevice.gatt.connected) {
-                bleDevice.gatt.disconnect();
-                return;
-            }
+        // Reset staré IP (192.168.1.100) na novou podsíť
+        let savedIp = localStorage.getItem('esp_master_ip');
+        if (!savedIp || savedIp.includes('192.168.1.')) {
+            savedIp = DEFAULT_IP;
+            localStorage.setItem('esp_master_ip', DEFAULT_IP);
+        }
+        ipInput.value = savedIp;
 
-            try {
-                console.log('Požadavek na Bluetooth zařízení...');
-                bleDevice = await navigator.bluetooth.requestDevice({
-                    filters: [{ namePrefix: 'ESP32_WLED' }],
-                    optionalServices: [SERVICE_UUID]
-                });
-
-                bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
-
-                statusText.textContent = 'Připojování...';
-
-                bleServer = await bleDevice.gatt.connect();
-                bleService = await bleServer.getPrimaryService(SERVICE_UUID);
-                writeCharacteristic = await bleService.getCharacteristic(CHARACTERISTIC_UUID);
-                stateCharacteristic = await bleService.getCharacteristic(STATE_CHARACTERISTIC_UUID);
-
-                await stateCharacteristic.startNotifications();
-                stateCharacteristic.addEventListener('characteristicvaluechanged', (e) => {
-                    let val = new TextDecoder().decode(e.target.value);
-                    if (devMode) {
-                        try {
-                            let js = JSON.parse(val);
-                            diagOut.textContent = JSON.stringify(js, null, 2);
-                        } catch(ex) {
-                            diagOut.textContent = val;
-                        }
-                    }
-                });
-
-                statusText.textContent = 'Připojeno';
-                statusBadge.classList.add('connected');
-                connectBtn.textContent = 'Odpojit systém';
-                connectBtn.style.backgroundColor = 'var(--status-red)';
-                
-            } catch (error) {
-                console.error('Chyba spojení:', error);
-                alert('Nepodařilo se připojit: ' + error);
-                onDisconnected();
-            }
+        ipInput.addEventListener('change', () => {
+            localStorage.setItem('esp_master_ip', ipInput.value.trim());
         });
 
-        function onDisconnected() {
-            statusText.textContent = 'Odpojeno';
-            statusBadge.classList.remove('connected');
-            connectBtn.textContent = 'Připojit k řídící jednotce';
-            connectBtn.style.backgroundColor = 'var(--accent-blue)';
-            bleDevice = null;
-            bleServer = null;
-            bleService = null;
-            writeCharacteristic = null;
-            stateCharacteristic = null;
+        function getBaseUrl() {
+            let ip = (ipInput.value.trim() || DEFAULT_IP);
+            if (!ip.startsWith('http')) {
+                ip = 'http://' + ip;
+            }
+            return ip;
         }
+
+        async function fetchState() {
+            const baseUrl = getBaseUrl();
+            if (!baseUrl) return;
+
+            try {
+                const response = await fetch(`${baseUrl}/api/state`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' },
+                    signal: AbortSignal.timeout(1500) // Timeout 1.5s
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    if (!isConnected) {
+                        isConnected = true;
+                        statusText.textContent = 'Připojeno';
+                        statusBadge.classList.add('connected');
+                    }
+
+                    if (devMode) {
+                        diagOut.textContent = JSON.stringify(data, null, 2);
+                    }
+                } else {
+                    throw new Error('Chyba serveru');
+                }
+            } catch (error) {
+                if (isConnected || statusText.textContent !== 'Odpojeno') {
+                    isConnected = false;
+                    statusText.textContent = 'Odpojeno';
+                    statusBadge.classList.remove('connected');
+                }
+            }
+        }
+
+        // Automatický start dotazování po načtení stránky
+        fetchState();
+        setInterval(fetchState, 500);
 
         function toggleDevMode() {
             if (!devMode) {
@@ -391,18 +417,25 @@
         }
 
         async function sendCommand(cmd) {
-            if (!writeCharacteristic) {
-                alert('Systém není připojen!');
+            const baseUrl = getBaseUrl();
+            if (!baseUrl) {
+                alert('Chybí IP adresa!');
                 return;
             }
             try {
-                const encoder = new TextEncoder();
-                const data = encoder.encode(cmd);
-                await writeCharacteristic.writeValue(data);
+                const response = await fetch(`${baseUrl}/api/command`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: cmd
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP chyba! status: ${response.status}`);
+                }
                 console.log('Odesláno:', cmd);
             } catch (error) {
                 console.error('Chyba při odesílání:', error);
-                alert('Příkaz se nepodařilo odeslat.');
+                alert('Příkaz se nepodařilo odeslat. Zkontrolujte připojení.');
             }
         }
     </script>

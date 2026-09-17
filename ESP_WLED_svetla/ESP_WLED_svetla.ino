@@ -125,10 +125,6 @@ void applyModeChange(int stav) {
   }
 }
 
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-      Serial.println("BLE PŘIPOJENO.");
 void setup() {
   Serial.begin(115200); // Debug do PC
   
@@ -148,36 +144,36 @@ void loop() {
   // Mozek posílá jednoduché textové příkazy (např. "M1" pro režim 1, "C2" pro barvu 2)
   if (Serial2.available()) {
     String msg = Serial2.readStringUntil('\n');
-    msg.trim(); // Odstraní neviditelné znaky (entery) int hodnota = msg.substring(1).toInt();
+    msg.trim(); // Odstraní neviditelné znaky (entery) 
+
+    Serial.print("WLED RX: '"); Serial.print(msg); Serial.println("'");
+
+    if (msg.length() >= 2) {
+      char prefix = msg.charAt(0);
+      int hodnota = msg.substring(1).toInt();
 
       if (prefix == 'M') {
         // M = Změna hlavního Módu (0, 1, 3)
-        if (currentMode != hodnota) {
-          currentMode = hodnota;
-          applyModeChange(currentMode);
-          Serial.print("Svetla: Zmenen mod na "); Serial.println(hodnota);
-        }
+        currentMode = hodnota;
+        applyModeChange(currentMode);
+        Serial.print("Svetla: Aplikovan mod "); Serial.println(hodnota);
       } 
       else if (prefix == 'C') {
         // C = Změna tlačítka barev (0, 1, 2)
-        if (currentColorBtn != hodnota) {
-          currentColorBtn = hodnota;
-          aktualizujSystem(currentColorBtn, currentCrystalsState, false);
-          Serial.print("Svetla: Barva tlacitka zmenena na "); Serial.println(hodnota);
-        }
+        currentColorBtn = hodnota;
+        aktualizujSystem(currentColorBtn, currentCrystalsState, false);
+        Serial.print("Svetla: Barva tlacitka zmenena na "); Serial.println(hodnota);
       } 
       else if (prefix == 'K') {
         // K = Změna krystalů (0, 1, 2)
-        if (currentCrystalsState != hodnota) {
-          currentCrystalsState = hodnota;
-          aktualizujSystem(currentColorBtn, currentCrystalsState, true); // true = zmenaZ8 pro lepsi prechod
-          Serial.print("Svetla: Stav krystalu zmenen na "); Serial.println(hodnota);
-        }
+        currentCrystalsState = hodnota;
+        aktualizujSystem(currentColorBtn, currentCrystalsState, true); // true = zmenaZ8 pro lepsi prechod
+        Serial.print("Svetla: Stav krystalu zmenen na "); Serial.println(hodnota);
       }
       else if (prefix == 'X') {
         // X = Developer Mod
-        Serial.print("Brana: Prepnut Dev Mod na "); Serial.println(hodnota);
+        Serial.print("Svetla: Prepnut Dev Mod na "); Serial.println(hodnota);
       }
     }
   }
-}Svetl
+}

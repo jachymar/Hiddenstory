@@ -2,21 +2,21 @@
 #include <HardwareSerial.h>
 #include <WiFi.h>
 #include <esp_now.h>
-#include <BLEDevice.h>
-#include <BLEUtils.h>
-#include <BLEServer.h>
+#include <SPI.h>
+#include <EthernetENC.h>
 
-// --- BLE NASTAVENÍ ---
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-#define STATE_CHARACTERISTIC_UUID "c4d2a8aa-7c45-4e4f-a999-f7dffb74c1a2"
+// --- ETHERNET (ENC28J60) NASTAVENÍ ---
+const int ETH_CS = 5;
+// SCK = 18, MISO = 19, MOSI = 23 (výchozí VSPI piny)
 
-BLEServer* pServer = NULL;
-BLECharacteristic* pStateCharacteristic = NULL;
-bool deviceConnected = false;
-bool oldDeviceConnected = false;
-bool cekaNaReklamu = false;
-unsigned long casOdpojeni = 0;
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+IPAddress staticIP(192, 168, 0, 100);
+IPAddress gateway(192, 168, 0, 1);
+IPAddress subnet(255, 255, 255, 0);
+IPAddress dnsServer(192, 168, 0, 1);
+
+EthernetServer server(80);
+bool eth_connected = false;
 
 // --- I2C ADRESY ARDUIN ---
 const int ADDR_TLACITKA       = 11; // Modul tlačítek pro barvy a schránky (B)
@@ -204,16 +204,13 @@ void posliTelemetryState(unsigned long ted) {
   String json = buildTelemetryState();
   if (json != posledniStateJson) {
     posledniStateJson = json;
-    if (pStateCharacteristic != NULL) {
-      pStateCharacteristic->setValue(json.c_str());
-      pStateCharacteristic->notify();
-    }
+    // Odesílání přes BLE odstraněno. Telemetrie se nyní čte na vyžádání přes HTTP API.
   }
 
   posledniStateSendMs = ted;
 }
 
-void processBleCommand(String msg) {
+void processCommand(String msg) {
   msg.trim();
   if (msg.length() > 0) {
     char cmd = msg.charAt(0);
@@ -244,26 +241,89 @@ void processBleCommand(String msg) {
   }
 }
 
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-      Serial.println("BLE PŘIPOJENO.");
-    }
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-      Serial.println("BLE ODPOJENO.");
-    }
-};
+// --- ZPRACOVÁNÍ HTTP POŽADAVKŮ (EthernetServer) ---
+void handleHttpClient() {
+  EthernetClient client = server.available();
+  if (!client) return;
 
-class MyCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      String rxValue = pCharacteristic->getValue();
-      if (rxValue.length() > 0) {
-        Serial.print("BLE prijato: "); Serial.println(rxValue.c_str());
-        processBleCommand(rxValue.c_str());
+  String currentLine = "";
+  String reqMethod = "";
+  String reqPath = "";
+  int contentLength = 0;
+  bool isHeader = true;
+  unsigned long startWait = millis();
+
+  while (client.connected() && (millis() - startWait < 1500)) {
+    if (client.available()) {
+      startWait = millis();
+      char c = client.read();
+
+      if (isHeader) {
+        if (c == '\n') {
+          if (currentLine.length() == 0) {
+            // Prázdný řádek značí konec HTTP hlaviček
+            isHeader = false;
+            
+            if (reqMethod == "OPTIONS") {
+              client.println("HTTP/1.1 204 No Content");
+              client.println("Access-Control-Allow-Origin: *");
+              client.println("Access-Control-Allow-Methods: POST, GET, OPTIONS");
+              client.println("Access-Control-Allow-Headers: Content-Type");
+              client.println("Connection: close");
+              client.println();
+              break;
+            } else if (reqMethod == "GET" && reqPath == "/api/state") {
+              client.println("HTTP/1.1 200 OK");
+              client.println("Content-Type: application/json");
+              client.println("Access-Control-Allow-Origin: *");
+              client.println("Connection: close");
+              client.println();
+              client.println(posledniStateJson);
+              break;
+            } else if (reqMethod != "POST" || reqPath != "/api/command") {
+              client.println("HTTP/1.1 404 Not Found");
+              client.println("Connection: close");
+              client.println();
+              break;
+            }
+          } else {
+            if (reqMethod == "") {
+              int sp1 = currentLine.indexOf(' ');
+              int sp2 = currentLine.indexOf(' ', sp1 + 1);
+              if (sp1 != -1 && sp2 != -1) {
+                reqMethod = currentLine.substring(0, sp1);
+                reqPath = currentLine.substring(sp1 + 1, sp2);
+              }
+            }
+            if (currentLine.startsWith("Content-Length:") || currentLine.startsWith("content-length:")) {
+              contentLength = currentLine.substring(15).toInt();
+            }
+            currentLine = "";
+          }
+        } else if (c != '\r') {
+          currentLine += c;
+        }
+      } else {
+        // Čtení těla POST požadavku
+        String body = "";
+        body += c;
+        while (client.available() && (contentLength == 0 || (int)body.length() < contentLength)) {
+          body += (char)client.read();
+        }
+        processCommand(body);
+        client.println("HTTP/1.1 200 OK");
+        client.println("Content-Type: text/plain");
+        client.println("Access-Control-Allow-Origin: *");
+        client.println("Connection: close");
+        client.println();
+        client.println("OK");
+        break;
       }
     }
-};
+  }
+  delay(1);
+  client.stop();
+}
 
 void setup() {
   // Debugování do počítače
@@ -276,8 +336,9 @@ void setup() {
   // Inicializace I2C jako Master
   Wire.begin();
   
-  // Inicializace ESP-NOW
+  // Inicializace ESP-NOW (WiFi mode musí být WIFI_STA)
   WiFi.mode(WIFI_STA);
+  
   if (esp_now_init() != ESP_OK) {
     Serial.println("Chyba inicializace ESP-NOW");
   } else {
@@ -291,32 +352,19 @@ void setup() {
     }
   }
   
-  // BLE Inicializace
-  BLEDevice::init("ESP32_WLED_Mozek");
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
-
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
-                                         CHARACTERISTIC_UUID,
-                                         BLECharacteristic::PROPERTY_WRITE
-                                       );
-  pCharacteristic->setCallbacks(new MyCallbacks());
-
-  pStateCharacteristic = pService->createCharacteristic(
-                            STATE_CHARACTERISTIC_UUID,
-                            BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
-                          );
-  pStateCharacteristic->setValue("{}");
-
-  pService->start();
+  // Inicializace Ethernetu (ENC28J60) se statickou IP
+  SPI.begin();
+  Ethernet.init(ETH_CS);
+  Serial.println("Inicializuji Ethernet (ENC28J60) se statickou IP...");
+  Ethernet.begin(mac, staticIP, dnsServer, gateway, subnet);
   
-  BLEAdvertising *pAdvertising = pServer->getAdvertising(); 
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06); 
-  pAdvertising->setMinPreferred(0x12);
-  pAdvertising->start();
+  Serial.print("Ethernet nastaven na statickou IP: ");
+  Serial.println(Ethernet.localIP());
+  eth_connected = true;
+
+  // Spuštění HTTP serveru
+  server.begin();
+  Serial.println("HTTP Server bezi na portu 80");
 
   casStartu = millis();
   Serial.println("ESP32 (Hlavni Mozek) byl uspesne nastartovan!");
@@ -324,21 +372,9 @@ void setup() {
 }
 
 void loop() {
+  handleHttpClient();
+  Ethernet.maintain();
   unsigned long ted = millis();
-
-  // BLE Opětovné připojení
-  if (!deviceConnected && oldDeviceConnected) {
-      casOdpojeni = ted;
-      cekaNaReklamu = true;
-      oldDeviceConnected = deviceConnected;
-  }
-  if (cekaNaReklamu && (ted - casOdpojeni > 500)) {
-      cekaNaReklamu = false;
-      pServer->getAdvertising()->start(); 
-  }
-  if (deviceConnected && !oldDeviceConnected) {
-      oldDeviceConnected = deviceConnected;
-  }
 
   if (!inicializaceHotova && (ted - casStartu >= 7000)) {
     if (readI2CDiagnostics(ADDR_LASER, dataLaser)) physGameMode = dataLaser.status;
