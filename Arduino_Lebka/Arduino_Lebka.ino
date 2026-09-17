@@ -19,7 +19,14 @@ DiagLebka myTelemetry = {0, 0, 0, 0, 0, 0};
 
 volatile bool cmdOpenLock = false;
 const char CMD_OPEN_LOCK = 'A';
-volatile bool sendDetailed = false;
+volatile byte i2c_req = 0;
+char lastLog[30] = "Start";
+
+void Log(const char* txt) {
+  strncpy(lastLog, txt, 29);
+  lastLog[29] = '\0';
+  Serial.println(txt);
+}
 
 const int pinySenzoru[] = {A0, A1, A2};
 const int pinLED_PWM = 6;              
@@ -69,9 +76,12 @@ void setup() {
 }
 
 void requestEvent() {
-  if (sendDetailed) {
+  if (i2c_req == 0x99) {
     Wire.write((byte*)&myTelemetry, sizeof(DiagLebka));
-    sendDetailed = false;
+    i2c_req = 0;
+  } else if (i2c_req == 0x98) {
+    Wire.write((byte*)lastLog, 30);
+    i2c_req = 0;
   } else {
     // Basic odpoved 1 byte: 2 = všechny krystaly, 0 = nic
     uint8_t basicState = (myTelemetry.crystals_mask == 7) ? 2 : 0;
@@ -83,7 +93,7 @@ void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read();
     if (c == CMD_OPEN_LOCK) cmdOpenLock = true;
-    else if (c == 0x99) sendDetailed = true;
+    else if (c == 0x99 || c == 0x98) i2c_req = c;
   }
 }
 
@@ -93,6 +103,7 @@ void loop() {
 
   // 1. OBSLUHA OTEVŘENÍ (OD MASTERA)
   if (cmdOpenLock && !oneWireAktivniPraveTed) {
+    Log("I2C: Prikaz k otevreni");
     oneWireAktivniPraveTed = true;
     casStartuOneWire = ted;
     digitalWrite(pinZamek, HIGH);      
@@ -151,6 +162,7 @@ void loop() {
   switch (stavHry) {
     case CEKANI_NA_KRYSTALY:
       if (vsechnyKrystalyOk && krystalAktivni[0] && krystalAktivni[1] && krystalAktivni[2]) {
+        Log("Vsechny krystaly na miste!");
         stavHry = ODPOCET;
         casZmenyStavu = ted;
       }
@@ -160,12 +172,14 @@ void loop() {
       if (vsechnyKrystalyOk == false) {
         if (casZtratyKrystalu == 0) casZtratyKrystalu = ted;
         if (ted - casZtratyKrystalu > 300) { 
+          Log("Krystal ztracen behem odpoctu");
           stavHry = CEKANI_NA_KRYSTALY;
           casZtratyKrystalu = 0;
         }
       } else {
         casZtratyKrystalu = 0; 
         if (ted - casZmenyStavu >= casDoOtevreniKrystaly) {
+          Log("Odpocet hotov. Oteviram!");
           stavHry = ODEMYKANI;
           casZmenyStavu = ted;
         }
@@ -180,6 +194,7 @@ void loop() {
 
     case HOTOVO_CEKANI_NA_VYNDANI:
       if (vsechnyKrystalyOk == false) {
+        Log("Krystaly odebrany. Reset.");
         stavHry = CEKANI_NA_KRYSTALY;
       }
       break;

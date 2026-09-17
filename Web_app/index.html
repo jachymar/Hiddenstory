@@ -309,8 +309,25 @@
                     <label style="font-size: 0.8rem; color: var(--text-muted);">IP ESP32:</label>
                     <input type="text" id="ipAddress" value="192.168.1.100" style="background: #111; border: 1px solid #333; color: #fff; padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">
                 </div>
-                <div class="terminal-container">
-                    <pre id="diagOut">Inicializace diagnostického streamu...</pre>
+                <div style="margin-bottom: 1rem;">
+                    <label style="font-size: 0.8rem; color: var(--text-muted);">Vyberte modul pro diagnostiku:</label>
+                    <select id="moduleSelect" onchange="selectModule(this.value)" style="width:100%; padding:0.5rem; background:#111; color:#fff; border:1px solid #333; border-radius:4px; margin-top:0.5rem; font-size:0.9rem;">
+                        <option value="0">-- Žádný (Vypnuto) --</option>
+                        <option value="1">Modul 1: Lebka</option>
+                        <option value="2">Modul 2: Světla</option>
+                        <option value="3">Modul 3: Tlačítka</option>
+                        <option value="4">Modul 4: Kola (Analogy)</option>
+                        <option value="5">Modul 5: Laser</option>
+                        <option value="6">Místnost 3: ESP32 (Ťukání + Audio)</option>
+                    </select>
+                </div>
+                <div class="terminal-container" style="display:flex; flex-direction:column; height: 350px;">
+                    <div id="diagStatus" style="flex: 1; border-bottom: 1px solid #333; padding-bottom: 0.5rem; margin-bottom: 0.5rem; white-space: pre-wrap; color: #38bdf8; font-family: 'Consolas', monospace; font-size: 0.85rem;">
+                        Inicializace diagnostického streamu...
+                    </div>
+                    <div id="diagTerminal" style="flex: 1; overflow-y: auto; color: #22c55e; font-family: 'Consolas', monospace; font-size: 0.85rem;">
+                        <div style="color: #666;">--- Historie Logů ---</div>
+                    </div>
                 </div>
             </div>
 
@@ -326,11 +343,13 @@
         const DEFAULT_IP = '192.168.0.100';
         let devMode = false;
         let isConnected = false;
+        let lastLogMessage = "";
 
         const statusBadge = document.getElementById('statusBadge');
         const statusText = document.getElementById('statusText');
         const diagPanel = document.getElementById('diagPanel');
-        const diagOut = document.getElementById('diagOut');
+        const diagStatus = document.getElementById('diagStatus');
+        const diagTerminal = document.getElementById('diagTerminal');
         const devLink = document.querySelector('.dev-link');
         const ipInput = document.getElementById('ipAddress');
 
@@ -354,6 +373,13 @@
             return ip;
         }
 
+        function selectModule(val) {
+            sendCommand('D' + val);
+            diagStatus.textContent = "Vyžádání dat z modulu " + val + "...";
+            diagTerminal.innerHTML = '<div style="color: #666;">--- Historie Logů Modulu ' + val + ' ---</div>';
+            lastLogMessage = ""; // Reset history tracker on module change
+        }
+
         async function fetchState() {
             const baseUrl = getBaseUrl();
             if (!baseUrl) return;
@@ -375,7 +401,20 @@
                     }
 
                     if (devMode) {
-                        diagOut.textContent = JSON.stringify(data, null, 2);
+                        if (data.diag_text) {
+                            diagStatus.textContent = data.diag_text;
+                            
+                            if (data.diag_log && data.diag_log !== lastLogMessage && data.diag_log !== "Start" && data.diag_log !== "") {
+                                lastLogMessage = data.diag_log;
+                                const time = new Date().toLocaleTimeString('cs-CZ');
+                                const logDiv = document.createElement('div');
+                                logDiv.innerHTML = `<span style="color:#888">[${time}]</span> ${data.diag_log}`;
+                                diagTerminal.appendChild(logDiv);
+                                diagTerminal.scrollTop = diagTerminal.scrollHeight;
+                            }
+                        } else {
+                            diagStatus.textContent = JSON.stringify(data, null, 2);
+                        }
                     }
                 } else {
                     throw new Error('Chyba serveru');
@@ -402,6 +441,7 @@
                     devLink.textContent = 'Disable System Config';
                     devLink.style.color = 'var(--status-green)';
                     devLink.style.opacity = '1';
+                    document.getElementById('moduleSelect').value = "0";
                     sendCommand('X1');
                 } else if (pwd !== null) {
                     alert("Nesprávný přístupový kód.");

@@ -34,16 +34,8 @@ bool laserIsOn = false;
 volatile byte i2cStatus = 0;
 byte lastStatusPrint = 255;
 int ldrValue = 0;
-volatile bool sendDetailed = false;
-
-struct DiagLaser {
-  uint8_t status;
-  uint8_t laser_on;
-  uint16_t ldr_val;
-  uint8_t fails;
-  uint8_t override_btn;
-} __attribute__((packed));
-DiagLaser myTelemetry = {0, 0, 0, 0, 0};
+volatile byte i2c_req = 0;
+char lastLog[30] = "Start";
 
 void setup() {
   pinMode(PIN_LASER, OUTPUT);
@@ -152,9 +144,12 @@ void loop() {
 }
 
 void requestEvent() {
-  if (sendDetailed) {
+  if (i2c_req == 0x99) {
     Wire.write((byte*)&myTelemetry, sizeof(DiagLaser)); 
-    sendDetailed = false;
+    i2c_req = 0;
+  } else if (i2c_req == 0x98) {
+    Wire.write((byte*)lastLog, 30);
+    i2c_req = 0;
   } else {
     Wire.write(i2cStatus);
   }
@@ -163,7 +158,7 @@ void requestEvent() {
 void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read();
-    if (c == 0x99) sendDetailed = true;
+    if (c == 0x99 || c == 0x98) i2c_req = c;
   }
 }
 
@@ -175,7 +170,7 @@ void checkStatusPrint() {
 }
 
 void triggerAlarm() {
-  Serial.println(F("PRERUSENO! Poplach."));
+  Log("PRERUSENO! Poplach.");
   i2cStatus = 1;      
   i2cTimer = millis(); 
   digitalWrite(PIN_LASER, LOW);
@@ -199,13 +194,13 @@ void attemptToTurnOn() {
     digitalWrite(PIN_LASER, 255);
   /* } else {
     failCounter++;
-    Serial.println(F("Chyba trefeni pri zapnuti!"));
+    Log("Chyba trefeni pri zapnuti!");
     
     if (failCounter >= MAX_FAILURES) {
       digitalWrite(PIN_LASER, LOW);
       laserIsOn = false;
       alignmentMode = true;
-      Serial.println(F("Alignment mode aktivni."));
+      Log("Alignment mode aktivni.");
     } else {
       triggerAlarm(); 
     }
@@ -234,4 +229,10 @@ void effectFadeOut() {
     delay(5);
   }
   digitalWrite(PIN_LASER, LOW);
+}
+
+void Log(const char* txt) {
+  strncpy(lastLog, txt, 29);
+  lastLog[29] = '\0';
+  Serial.println(txt);
 }

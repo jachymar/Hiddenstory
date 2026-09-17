@@ -12,9 +12,16 @@ const unsigned long BEEP_TIME_MS = 100;       // Délka jednorázového pípnut�
 #include <Wire.h>
 #define I2C_SLAVE_ADDR 20
 
-volatile bool sendDetailed = false;
+volatile byte i2c_req = 0;
 volatile byte i2cStatus = 0;
 volatile bool cmdOpenLock = false;
+char lastLog[30] = "Start";
+
+void Log(const char* txt) {
+  strncpy(lastLog, txt, 29);
+  lastLog[29] = '\0';
+  Serial.println(txt);
+}
 
 struct DiagTukani {
   uint8_t status;
@@ -25,9 +32,12 @@ struct DiagTukani {
 DiagTukani myTelemetry = {0, 0, 0, 0};
 
 void requestEvent() {
-  if (sendDetailed) {
+  if (i2c_req == 0x99) {
     Wire.write((byte*)&myTelemetry, sizeof(DiagTukani));
-    sendDetailed = false;
+    i2c_req = 0;
+  } else if (i2c_req == 0x98) {
+    Wire.write((byte*)lastLog, 30);
+    i2c_req = 0;
   } else {
     Wire.write(i2cStatus);
   }
@@ -36,7 +46,7 @@ void requestEvent() {
 void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read();
-    if (c == 0x99) sendDetailed = true;
+    if (c == 0x99 || c == 0x98) i2c_req = c;
     else if (c == 'O') cmdOpenLock = true;
   }
 }
@@ -95,7 +105,7 @@ void loop() {
   // Zpracovani I2C povelu pro nucene otevreni
   if (cmdOpenLock && !isUnlocked) {
     cmdOpenLock = false;
-    Serial.println("\n🎉🎉🎉 I2C POVEL: Nucene otevreni!");
+    Log("I2C POVEL: Nucene otevreni!");
     digitalWrite(OUTPUT_PIN, HIGH);
     lockEndTime = currentMillis + LOCK_TIME_MS;
     isUnlocked = true;
@@ -118,7 +128,7 @@ void loop() {
 
   // 3. Timeout reset po 3 sekundách nečinnosti
   if (lastTapTime > 0 && (currentMillis - lastTapTime) > RESET_TIMEOUT_MS) {
-    Serial.println("\n❌ Dlouha pauza. Mazu pamet (Timeout).");
+    Log("Dlouha pauza. Mazu pamet.");
     triggerBeep(BEEP_TIME_MS);
     resetRhythm();
   }
@@ -133,7 +143,7 @@ void loop() {
 void handleTap(unsigned long currentTime) {
   // První ťuknutí po resetu
   if (lastTapTime == 0) {
-    Serial.println("\n✅ Prvni t'uknuti zaznamenano...");
+    Log("Prvni tuknuti zaznamenano...");
     lastTapTime = currentTime;
     triggerBeep(BEEP_TIME_MS);
     return;
@@ -213,15 +223,14 @@ bool evaluateRhythm() {
   }
 
   if (rhythmSuccess) {
-    Serial.println("\n🎉🎉🎉 RYTMUS USPESNY! Aktivuji pin 8.");
-
+    Log("RYTMUS USPESNY! Aktivuji.");
     digitalWrite(OUTPUT_PIN, HIGH);
     lockEndTime = millis() + LOCK_TIME_MS;
     isUnlocked = true;
 
     return true;
   } else {
-    Serial.println("❌ Sekvence neodpovida. Cekam na dalsi t'uknuti...\n");
+    Log("Sekvence neodpovida. Reset.");
     return false;
   }
 }

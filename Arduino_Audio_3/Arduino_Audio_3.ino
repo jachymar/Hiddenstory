@@ -5,9 +5,16 @@
 
 #define I2C_SLAVE_ADDR 21
 
-volatile bool sendDetailed = false;
+volatile byte i2c_req = 0;
 volatile byte i2cStatus = 0;
 volatile bool cmdStop = false;
+char lastLog[30] = "Start";
+
+void Log(const char* txt) {
+  strncpy(lastLog, txt, 29);
+  lastLog[29] = '\0';
+  Serial.println(txt);
+}
 
 struct DiagAudio3 {
   uint8_t status;
@@ -18,9 +25,12 @@ struct DiagAudio3 {
 DiagAudio3 myTelemetry = {0, 0, 0, 0};
 
 void requestEvent() {
-  if (sendDetailed) {
+  if (i2c_req == 0x99) {
     Wire.write((byte*)&myTelemetry, sizeof(DiagAudio3));
-    sendDetailed = false;
+    i2c_req = 0;
+  } else if (i2c_req == 0x98) {
+    Wire.write((byte*)lastLog, 30);
+    i2c_req = 0;
   } else {
     Wire.write(i2cStatus);
   }
@@ -29,7 +39,7 @@ void requestEvent() {
 void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read();
-    if (c == 0x99) sendDetailed = true;
+    if (c == 0x99 || c == 0x98) i2c_req = c;
     else if (c == 'S') cmdStop = true;
   }
 }
@@ -85,7 +95,7 @@ void stopEverything() {
   if (filePlayer.playingMusic) {
     filePlayer.stopPlaying();
   }
-  Serial.println(F(">>> SYSTÉM VYPNUT (Deaktivace) <<<"));
+  Log("SYSTEM VYPNUT (Deaktivace)");
 }
 
 void setup() {
@@ -140,7 +150,7 @@ void loop() {
   bool currentDoorState = digitalRead(PIN_DVERE);
   if (currentDoorState == HIGH && lastDoorState == LOW) {
     if (!doorCountdownActive) {
-      Serial.println(F("Dveře otevřeny! Odpočet 5s pro 0003.mp3"));
+      Log("Dvere otevreny! Odpocet 5s.");
       doorCountdownActive = true;
       doorTriggerTime = millis();
     }
@@ -148,7 +158,7 @@ void loop() {
   lastDoorState = currentDoorState;
 
   if (doorCountdownActive && (millis() - doorTriggerTime >= PRODLEVA_DVERE)) {
-    Serial.println(F("5s vypršelo (Dveře) -> Hraji NEZASTAVITELNÝ ALARM 0003.mp3"));
+    Log("5s vyprselo. Hraji ALARM!");
     filePlayer.stopPlaying(); 
     filePlayer.startPlayingFile(TRACK_FINAL);
     isAlarmPlaying = true; // Zamykáme systém!
@@ -174,7 +184,7 @@ void loop() {
     } 
     // POTVRZENÝ 1 KLIK
     else if (millis() - lastClickTime > CLICK_WINDOW) {
-      Serial.println(F("Špatný signál potvrzen! Startuji tichý 10s odpočet."));
+      Log("Spatny signal! Startuji 10s.");
       if (filePlayer.playingMusic) {
         filePlayer.stopPlaying();
       }
@@ -187,7 +197,7 @@ void loop() {
 
   // Vyhodnocení 10s odpočtu pro signál
   if (signalCountdownActive && (millis() - signalStartTime >= PRODLEVA_SIGNAL)) {
-    Serial.println(F("10s vypršelo (Signál) -> Hraji NEZASTAVITELNÝ ALARM 0003.mp3"));
+    Log("10s vyprselo. Hraji ALARM!");
     filePlayer.stopPlaying();
     filePlayer.startPlayingFile(TRACK_FINAL); 
     isAlarmPlaying = true; // Zamykáme systém!

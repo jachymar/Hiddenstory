@@ -14,7 +14,14 @@ unsigned long casZmenyI2C = 0;
 const unsigned long DOBA_STAVU = 1000;
 volatile bool cmdOpenLock = false; 
 const char CMD_OPEN_LOCK = 'B';
-volatile bool sendDetailed = false;
+volatile byte i2c_req = 0;
+char lastLog[30] = "Start";
+
+void Log(const char* txt) {
+  strncpy(lastLog, txt, 29);
+  lastLog[29] = '\0';
+  Serial.println(txt);
+}
 
 /* --- PROMĚNNÉ PRO ZÁMEK (Nezávislý Debounce) --- */
 int zadaneHeslo[4];
@@ -69,7 +76,7 @@ void loop() {
 
   // Příkaz z ESP32 k otevření
   if (cmdOpenLock && !zamekVakci) { 
-    Serial.println("[I2C] Prikaz k otevreni zamku!");
+    Log("I2C: Prikaz k otevreni!");
     otevriZamek(ted); 
     cmdOpenLock = false; 
   }
@@ -80,7 +87,7 @@ void loop() {
   if (zamekVakci && (ted - startServoZamek > 3000)) { 
     servoZamek.write(0); 
     zamekVakci = false; 
-    Serial.println("[SERVO 9] Zamek se mechanicky zavira.");
+    Log("Zamek se mechanicky zavira");
   }
 
   // Aktualizace telemetrie pro ESP32
@@ -94,7 +101,7 @@ void loop() {
 void handleButtons(unsigned long ted) {
   // Timeout - resetování rozepsaného hesla po 5s nečinnosti
   if (pocitadloStisku > 0 && (ted - posledniAktivitaHesla > 5000)) {
-    Serial.println("[KLAVESNICE] Zadavani trvalo prilis dlouho. Resetuji.");
+    Log("Timeout zadavani. Resetuji.");
     pocitadloStisku = 0; 
   }
 
@@ -124,10 +131,10 @@ void handleButtons(unsigned long ted) {
           }
           
           if (ok) {
-            Serial.println("[VYSLEDEK] >>> HESLO SPRAVNE <<< Oteviram.");
+            Log(">>> HESLO SPRAVNE <<<");
             otevriZamek(ted);
           } else {
-            Serial.println("[VYSLEDEK] >>> HESLO NESPRAVNE <<<");
+            Log(">>> HESLO NESPRAVNE <<<");
             i2cStatus = 1; casZmenyI2C = ted; 
           }
           pocitadloStisku = 0; 
@@ -142,14 +149,17 @@ void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read();
     if (c == CMD_OPEN_LOCK) cmdOpenLock = true;
-    else if (c == 0x99) sendDetailed = true;
+    else if (c == 0x99 || c == 0x98) i2c_req = c;
   }
 }
 
 void requestEvent() { 
-  if (sendDetailed) {
+  if (i2c_req == 0x99) {
     Wire.write((byte*)&myTelemetry, sizeof(DiagTlacitka)); 
-    sendDetailed = false;
+    i2c_req = 0;
+  } else if (i2c_req == 0x98) {
+    Wire.write((byte*)lastLog, 30);
+    i2c_req = 0;
   } else {
     Wire.write(i2cStatus);
   }

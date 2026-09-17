@@ -17,7 +17,14 @@ unsigned long casZmenyI2C = 0;
 const unsigned long DOBA_STAVU = 1000;
 volatile bool cmdOpenLock = false; 
 const char CMD_OPEN_LOCK = 'C';
-volatile bool sendDetailed = false;
+volatile byte i2c_req = 0;
+char lastLog[30] = "Start";
+
+void Log(const char* txt) {
+  strncpy(lastLog, txt, 29);
+  lastLog[29] = '\0';
+  Serial.println(txt);
+}
 
 /* --- PROMĚNNÉ PRO ANALOGOVOU LOGIKU --- */
 bool stavPinuAktivni[3] = {false, false, false}; 
@@ -66,7 +73,7 @@ void loop() {
 
   // Příkaz z ESP32 k otevření
   if (cmdOpenLock && !analogServoVakci) { 
-    Serial.println("[I2C] Prikaz k aktivaci analogu!");
+    Log("I2C: Prikaz aktivace");
     aktivujAnalogServo(ted); 
     cmdOpenLock = false; 
   }
@@ -77,7 +84,7 @@ void loop() {
   if (analogServoVakci && (ted - startServoAnalog > 2000)) { 
     servoAnalog.write(0); 
     analogServoVakci = false; 
-    Serial.println("[SERVO 10] Analogove servo se vraci.");
+    Log("Servo se mechanicky vraci");
   }
 
   // Aktualizace telemetrie pro ESP32
@@ -126,11 +133,11 @@ void handleAnalog(unsigned long ted) {
 
     if (startCasPodminkyAnalog == 0 && !aktivaceDokoncena) {
       startCasPodminkyAnalog = ted;
-      Serial.println("[SYSTEM] Magnety detekovany. Startuji odpocet 1.5s...");
+      Log("Magnety OK. Odpocet 1.5s.");
     }
     
     if (startCasPodminkyAnalog != 0 && (ted - startCasPodminkyAnalog >= 1500) && !aktivaceDokoncena) {
-      Serial.println("[AKCE] 1.5s ubehlo! Aktivuji analogove servo.");
+      Log("1.5s ubehlo! Oteviram.");
       aktivujAnalogServo(ted);
     }
   } 
@@ -144,7 +151,7 @@ void handleAnalog(unsigned long ted) {
     if (ted - startCasResetuAnalog >= 1000) {
       if (aktivaceDokoncena) {
         aktivaceDokoncena = false;
-        Serial.println("[SYSTEM] 1s stabilita v klidu. System pripraven.");
+        Log("1s v klidu. Pripraveno.");
       }
       startCasResetuAnalog = 0; 
     }
@@ -156,14 +163,17 @@ void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read();
     if (c == CMD_OPEN_LOCK) cmdOpenLock = true;
-    else if (c == 0x99) sendDetailed = true;
+    else if (c == 0x99 || c == 0x98) i2c_req = c;
   }
 }
 
 void requestEvent() { 
-  if (sendDetailed) {
+  if (i2c_req == 0x99) {
     Wire.write((byte*)&myTelemetry, sizeof(DiagKola)); 
-    sendDetailed = false;
+    i2c_req = 0;
+  } else if (i2c_req == 0x98) {
+    Wire.write((byte*)lastLog, 30);
+    i2c_req = 0;
   } else {
     Wire.write(i2cStatus);
   }

@@ -30,7 +30,14 @@ unsigned long casPoslednihoVzorku = 0;
 /* --- PROMĚNNÉ PRO I2C A LEBKU --- */
 volatile byte i2cStatus = 0; 
 const byte I2C_SLAVE_ADDR = 14;
-volatile bool sendDetailed = false;
+volatile byte i2c_req = 0;
+char lastLog[30] = "Start";
+
+void Log(const char* txt) {
+  strncpy(lastLog, txt, 29);
+  lastLog[29] = '\0';
+  Serial.println(txt);
+}
 
 /* --- STAVOVÉ PROMĚNNÉ SYSTÉMU --- */
 bool cyklusBezi = false;
@@ -154,7 +161,7 @@ void loop() {
 
   // SPUŠTĚNÍ SHOW (Kulička je přiložena)
   if (senzorAktivni && pripravenoKActivaci && !cyklusBezi) {
-    Serial.println(">>> SPUSTENI SHOW! Kulicka prilozena.");
+    Log("SHOW START! Kulicka vlozena");
     cyklusBezi = true;
     pripravenoKActivaci = false;
     
@@ -288,6 +295,7 @@ void loop() {
       if (hotovo) {
         cyklusBezi = false; i2cStatus = 0; casZacatkuSviceni = 0; casVstupuDoOkna = 0; 
         casStartuPauzy = 0;
+        Log("Sekvence dokoncena.");
         for(int i=0; i<pocetSvetel; i++) nastavUnikatniParametry(i);
       }
     }
@@ -303,9 +311,12 @@ void loop() {
 
 // --- I2C FUNKCE ---
 void requestEvent() { 
-  if (sendDetailed) {
+  if (i2c_req == 0x99) {
     Wire.write((byte*)&myTelemetry, sizeof(DiagSvetla)); 
-    sendDetailed = false;
+    i2c_req = 0;
+  } else if (i2c_req == 0x98) {
+    Wire.write((byte*)lastLog, 30);
+    i2c_req = 0;
   } else {
     Wire.write(i2cStatus);
   }
@@ -314,7 +325,7 @@ void requestEvent() {
 void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read(); 
-    if (c == 0x99) sendDetailed = true;
+    if (c == 0x99 || c == 0x98) i2c_req = c;
   }
 }
 
