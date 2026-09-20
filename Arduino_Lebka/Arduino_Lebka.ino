@@ -1,11 +1,11 @@
-#include <OneWireHub.h>
-#include <DS2408.h>
-#include <Wire.h>
+#include <SoftwareSerial.h>
+#include <Servo.h>
 
-const int ONEWIRE_PIN = 3; 
-OneWireHub hub(ONEWIRE_PIN);
-DS2408 ds2408(0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00); 
-const byte I2C_SLAVE_ADDR = 15;
+const int RX_PIN = 2;    // Arduino Lebka <- Laser TX
+const int TX_PIN = 3;    // Arduino Lebka -> Laser RX
+SoftwareSerial bridgeSerial(RX_PIN, TX_PIN);
+const int pinServoSchranky = 9;
+Servo servoSchranky;
 
 struct DiagLebka {
   uint8_t status;
@@ -19,8 +19,9 @@ DiagLebka myTelemetry = {0, 0, 0, 0, 0, 0};
 
 volatile bool cmdOpenLock = false;
 const char CMD_OPEN_LOCK = 'A';
-volatile byte i2c_req = 0;
 char lastLog[30] = "Start";
+bool i2cOpenActive = false;
+unsigned long casStartuOtevreni = 0;
 
 void Log(const char* txt) {
   strncpy(lastLog, txt, 29);
@@ -29,19 +30,22 @@ void Log(const char* txt) {
 }
 
 const int pinySenzoru[] = {A0, A1, A2};
-const int pinLED_PWM = 6;              
-const int pinZamek = 11;               
-const int pinReleLebka = 7;            
+const int pinLED_PWM = 6;
+const int pinZamek = 11;
+const int pinReleLebka = 7;
 
-const int dobaOtevreniOneWire = 1000;      
-const int casDoOtevreniKrystaly = 7000;    
-const int dobaCekaniAkceKrystaly = 1500;   
-const int rychlostFading = 24;             
+const int dobaOtevreniI2C = 1000;
+const int dobaPredServem = 220;
+const int dobaOtevreniServa = 1200;
+const int casDoOtevreniKrystaly = 7000;
+const int dobaCekaniAkceKrystaly = 1500;
+const int rychlostFading = 24;
+const int servoZavreno = 180;
+const int servoOtevreno = 30;
 
-// LIMITY PRO PLOCHÉ MAGNETY
-const int limitAktivace = 560;     
-const int limitDeaktivace = 545;   
-const int dobaPotvrzeniCile = 200; 
+const int limitAktivace = 560;
+const int limitDeaktivace = 545;
+const int dobaPotvrzeniCile = 200;
 
 bool krystalAktivni[3] = {false, false, false};
 unsigned long casAktivaceKrystalu[3] = {0, 0, 0};
@@ -55,82 +59,129 @@ enum HerniStav {
 };
 HerniStav stavHry = CEKANI_NA_KRYSTALY;
 
-bool oneWireAktivniPraveTed = false; 
-unsigned long casStartuOneWire = 0;
 unsigned long casZmenyStavu = 0;
-unsigned long casZtratyKrystalu = 0; 
+unsigned long casZtratyKrystalu = 0;
+
+enum SchrankovaSekvence {
+  SCHRANKA_IDLE,
+  SCHRANKA_ZAMEK,
+  SCHRANKA_SERVO,
+  SCHRANKA_ZAVIRANI
+};
+
+SchrankovaSekvence schrankovaSekvence = SCHRANKA_IDLE;
+unsigned long casSekvenceSchranky = 0;
+
+void handleBridgeCommand(char cmd) {
+  if (cmd == CMD_OPEN_LOCK) {
+    cmdOpenLock = true;
+    bridgeSerial.println("OK");
+  } else if (cmd == 'S') {
+    bridgeSerial.print((int)myTelemetry.crystals_mask);
+    bridgeSerial.print('\n');
+  } else if (cmd == 'D') {
+    bridgeSerial.print((int)stavHry);
+    bridgeSerial.print(',');
+    bridgeSerial.print((int)myTelemetry.crystals_mask);
+    bridgeSerial.print(',');
+    bridgeSerial.print(myTelemetry.k1_val);
+    bridgeSerial.print(',');
+    bridgeSerial.print(myTelemetry.k2_val);
+    bridgeSerial.print(',');
+    bridgeSerial.print(myTelemetry.k3_val);
+    bridgeSerial.print(',');
+    bridgeSerial.print((int)myTelemetry.lock_open);
+    bridgeSerial.print('\n');
+  } else if (cmd == 'L') {
+    bridgeSerial.println(lastLog);
+  }
+}
 
 void setup() {
-  Serial.begin(115200); 
-  
+  Serial.begin(115200);
+  bridgeSerial.begin(9600);
+
   pinMode(pinLED_PWM, OUTPUT);
   pinMode(pinZamek, OUTPUT);
   pinMode(pinReleLebka, OUTPUT);
-  
+
+  servoSchranky.attach(pinServoSchranky);
+  servoSchranky.write(servoZavreno);
+
   digitalWrite(pinZamek, LOW);
   digitalWrite(pinReleLebka, LOW);
-
-  Wire.begin(I2C_SLAVE_ADDR);
-  Wire.onRequest(requestEvent);
-  Wire.onReceive(receiveEvent);
-}
-
-void requestEvent() {
-  if (i2c_req == 0x99) {
-    Wire.write((byte*)&myTelemetry, sizeof(DiagLebka));
-    i2c_req = 0;
-  } else if (i2c_req == 0x98) {
-    Wire.write((byte*)lastLog, 30);
-    i2c_req = 0;
-  } else {
-    // Basic odpoved 1 byte: 2 = všechny krystaly, 0 = nic
-    uint8_t basicState = (myTelemetry.crystals_mask == 7) ? 2 : 0;
-    Wire.write(basicState);
-  }
-}
-
-void receiveEvent(int howMany) {
-  while (Wire.available()) {
-    byte c = Wire.read();
-    if (c == CMD_OPEN_LOCK) cmdOpenLock = true;
-    else if (c == 0x99 || c == 0x98) i2c_req = c;
-  }
 }
 
 void loop() {
   unsigned long ted = millis();
-  hub.poll();
 
-  // 1. OBSLUHA OTEVŘENÍ (OD MASTERA)
-  if (cmdOpenLock && !oneWireAktivniPraveTed) {
-    Log("I2C: Prikaz k otevreni");
-    oneWireAktivniPraveTed = true;
-    casStartuOneWire = ted;
-    digitalWrite(pinZamek, HIGH);      
-    digitalWrite(pinReleLebka, HIGH);  
-    cmdOpenLock = false; 
+  if (bridgeSerial.available()) {
+    char c = bridgeSerial.read();
+    if (c == 'A' || c == 'S' || c == 'D' || c == 'L') {
+      handleBridgeCommand(c);
+    }
   }
 
-  if (oneWireAktivniPraveTed && (ted - casStartuOneWire >= dobaOtevreniOneWire)) {
-    oneWireAktivniPraveTed = false;
+  if (cmdOpenLock && schrankovaSekvence == SCHRANKA_IDLE) {
+    Log("UART: Prikaz k otevreni");
+    i2cOpenActive = true;
+    casStartuOtevreni = ted;
+    casSekvenceSchranky = ted;
+    schrankovaSekvence = SCHRANKA_ZAMEK;
+    digitalWrite(pinZamek, HIGH);
+    digitalWrite(pinReleLebka, HIGH);
+    cmdOpenLock = false;
+  }
+
+  switch (schrankovaSekvence) {
+    case SCHRANKA_ZAMEK:
+      if (ted - casSekvenceSchranky >= dobaPredServem) {
+        servoSchranky.write(servoOtevreno);
+        casSekvenceSchranky = ted;
+        schrankovaSekvence = SCHRANKA_SERVO;
+      }
+      break;
+
+    case SCHRANKA_SERVO:
+      if (ted - casSekvenceSchranky >= dobaOtevreniServa) {
+        servoSchranky.write(servoZavreno);
+        digitalWrite(pinZamek, LOW);
+        digitalWrite(pinReleLebka, LOW);
+        casSekvenceSchranky = ted;
+        schrankovaSekvence = SCHRANKA_ZAVIRANI;
+      }
+      break;
+
+    case SCHRANKA_ZAVIRANI:
+      if (ted - casSekvenceSchranky >= 250) {
+        servoSchranky.write(servoZavreno);
+        schrankovaSekvence = SCHRANKA_IDLE;
+        i2cOpenActive = false;
+      }
+      break;
+
+    case SCHRANKA_IDLE:
+      break;
+  }
+
+  if (i2cOpenActive && (ted - casStartuOtevreni >= dobaOtevreniI2C) && schrankovaSekvence == SCHRANKA_IDLE) {
+    i2cOpenActive = false;
     digitalWrite(pinReleLebka, LOW);
   }
 
-  // 2. ČTENÍ SENZORŮ KRYSTALŮ
   bool vsechnyKrystalyOk = true;
   for (int i = 0; i < 3; i++) {
     int akt = analogRead(pinySenzoru[i]);
-    
+
     if (akt >= limitAktivace) {
-      casDeaktivaceKrystalu[i] = 0; 
+      casDeaktivaceKrystalu[i] = 0;
       if (!krystalAktivni[i]) {
         if (casAktivaceKrystalu[i] == 0) casAktivaceKrystalu[i] = ted;
         if (ted - casAktivaceKrystalu[i] >= dobaPotvrzeniCile) {
           krystalAktivni[i] = true;
         }
       }
-    } 
-    else if (akt <= limitDeaktivace) {
+    } else if (akt <= limitDeaktivace) {
       casAktivaceKrystalu[i] = 0;
       if (krystalAktivni[i]) {
         if (casDeaktivaceKrystalu[i] == 0) casDeaktivaceKrystalu[i] = ted;
@@ -139,26 +190,12 @@ void loop() {
         }
       }
     }
-    
+
     if (krystalAktivni[i] == false) {
       vsechnyKrystalyOk = false;
     }
   }
 
-  // ZPOŽDĚNÍ ZNĚLKY: Pin 0 hlásí hotovo až ve stavu ODPOCET nebo dále
-  ds2408.setPinState(0, (stavHry == ODPOCET || stavHry == ODEMYKANI) ? false : true);
-  // --- ONEWIRE TELEMETRIE ---
-  // Využíváme zbylé virtuální PIO piny DS2408 pro přenos stavu jednotlivých krystalů
-  // a stavu hry směrem k Arduino_Svetla, které je předá dál do ESP32.
-  ds2408.setPinState(2, krystalAktivni[0]);
-  ds2408.setPinState(3, krystalAktivni[1]);
-  ds2408.setPinState(4, krystalAktivni[2]);
-  
-  ds2408.setPinState(5, (stavHry == CEKANI_NA_KRYSTALY));
-  ds2408.setPinState(6, (stavHry == ODPOCET));
-  ds2408.setPinState(7, (stavHry == ODEMYKANI || stavHry == HOTOVO_CEKANI_NA_VYNDANI));
-
-  // 3. LOGIKA AUTOMATU
   switch (stavHry) {
     case CEKANI_NA_KRYSTALY:
       if (vsechnyKrystalyOk && krystalAktivni[0] && krystalAktivni[1] && krystalAktivni[2]) {
@@ -171,13 +208,13 @@ void loop() {
     case ODPOCET:
       if (vsechnyKrystalyOk == false) {
         if (casZtratyKrystalu == 0) casZtratyKrystalu = ted;
-        if (ted - casZtratyKrystalu > 300) { 
+        if (ted - casZtratyKrystalu > 300) {
           Log("Krystal ztracen behem odpoctu");
           stavHry = CEKANI_NA_KRYSTALY;
           casZtratyKrystalu = 0;
         }
       } else {
-        casZtratyKrystalu = 0; 
+        casZtratyKrystalu = 0;
         if (ted - casZmenyStavu >= casDoOtevreniKrystaly) {
           Log("Odpocet hotov. Oteviram!");
           stavHry = ODEMYKANI;
@@ -200,18 +237,17 @@ void loop() {
       break;
   }
 
-  if (oneWireAktivniPraveTed || (stavHry == ODEMYKANI)) {
+  if (i2cOpenActive || (stavHry == ODEMYKANI)) {
     digitalWrite(pinZamek, HIGH);
   } else {
     digitalWrite(pinZamek, LOW);
   }
 
-  // 4. EFEKT SVĚTLA
   static int jas = 0;
   static unsigned long lastF = 0;
-  
+
   bool efektSvetla = (stavHry != CEKANI_NA_KRYSTALY);
-  
+
   if (ted - lastF >= rychlostFading) {
     if (efektSvetla && jas < 255) jas++;
     else if (!efektSvetla && jas > 0) jas--;
@@ -224,5 +260,5 @@ void loop() {
   myTelemetry.k1_val = analogRead(pinySenzoru[0]);
   myTelemetry.k2_val = analogRead(pinySenzoru[1]);
   myTelemetry.k3_val = analogRead(pinySenzoru[2]);
-  myTelemetry.lock_open = (oneWireAktivniPraveTed || stavHry == ODEMYKANI) ? 1 : 0;
+  myTelemetry.lock_open = (i2cOpenActive || schrankovaSekvence != SCHRANKA_IDLE || stavHry == ODEMYKANI) ? 1 : 0;
 }

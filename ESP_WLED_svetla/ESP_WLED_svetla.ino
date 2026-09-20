@@ -2,34 +2,70 @@
 #include <HTTPClient.h>
 
 // --- WLED NASTAVENÍ ---
-const char* ssid = "LED-AP";
+const char* ssid = "Indy-Wifi";
 const char* password = "wled1234";
-const char* wled_ips[] = {"5.3.2.2", "5.3.2.3", "5.3.2.4"};
+const char* wled_ips[] = {"192.168.1.2", "192.168.1.3", "192.168.1.4"};
 
-IPAddress local_IP(5,3,2,1);
-IPAddress gateway(5,3,2,1);
+IPAddress local_IP(192,168,1,50); // Nastavime ESP na statickou .50 at je hned pripojene
+IPAddress gateway(192,168,1,1);
 IPAddress subnet(255,255,255,0);
+IPAddress primaryDNS(8,8,8,8); // Bez DNS casto pada DHCP reseni
 
 // --- BAREVNÉ KONSTANTY ---
 const int baseR = 193, baseG = 99, baseB = 17;     // Herní oranžová
 const int servR = 255, servG = 203, servB = 154;   // Pracovní / Technická barva
 const int druhyR = 0, druhyG = 157, druhyB = 255;  // Modrá (2. místnost)
 
-const int jasVysoky1 = 172, jasVysoky3 = 15;       
+const int jasVysoky1 = 172;       
 const int jasNizky = 10, jasDruhyStandard = 5;    
+const int jasVysoky3 = 15;
 
-int currentMode = 0; // Režim: 0=Herní, 1=Vypnuto, 3=Pracovní
+int currentMode = 3; // Režim po zapnutí: 0=Herní, 1=Vypnuto, 3=Pracovní
 int currentColorBtn = 0; // Tlačítka: 1=Červená, 2=Zelená, 0=Nic
 int currentCrystalsState = 0; // Krystaly: 2=Modrá, 0=Nic
+int currentSvetlaSeq = 0; // 0 = klid/vypnuto, 1 = běží kaskáda na Arduinu (zeslabit WLED1)
+
+// Uchování stavu připojení pro 3 WLED zařízení
+bool wledStatus[3] = {false, false, false};
+unsigned long lastPingTime = 0;
+
+void pingWLEDs() {
+  HTTPClient http;
+  http.setTimeout(150); // Zkraceno, aby ping neblokoval WiFi task
+  http.setReuse(true); // Udrzet otevrene TCP spojeni zrychli celou smycku
+  bool changed = false;
+  
+  for(int i = 0; i < 3; i++) {
+    http.begin("http://" + String(wled_ips[i]) + "/json/state");
+    int httpCode = http.GET();
+    bool isOnline = (httpCode > 0); // Nekontrolujeme striktne 200, jakakoli odpoved znamena, ze modul zije
+    
+    if (wledStatus[i] != isOnline) {
+      wledStatus[i] = isOnline;
+      changed = true;
+    }
+  }
+  http.end();
+
+  // Odeslat stav do Master jednotky
+  String statusMsg = "WLED:";
+  statusMsg += wledStatus[0] ? "1" : "0";
+  statusMsg += ",";
+  statusMsg += wledStatus[1] ? "1" : "0";
+  statusMsg += ",";
+  statusMsg += wledStatus[2] ? "1" : "0";
+  Serial2.println(statusMsg);
+}
 
 void posliPrikaz(const char* ip, String json) {
   HTTPClient http;
-  http.setTimeout(150); 
+  http.setTimeout(100); // 100ms staci pro odeslani asynchronniho paketu do lokalni site
   http.begin("http://" + String(ip) + "/json/state");
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Connection", "close");
   http.POST(json);
   http.end();
+  delay(1); // Uvolneni tasku (Watchdog)
 }
 
 String vytvorJson(int r, int g, int b, int jas, int tt, int fx = 102) {
@@ -49,8 +85,10 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
   if (s8 == 2) { 
     // Modro-oranžový mix při plném jasu (Krystaly v Lebce)
     r1 = (baseR * 40) / 100; g1 = (baseG * 40) / 100; b1 = (baseB * 40 + 255 * 60) / 100;
-    jas1 = 255; jas2 = jasDruhyStandard; jas3 = 255;
-    if (vsem || zmenaZ8) { tt13 = 20; tt2 = 2; }
+    jas1 = (currentSvetlaSeq == 1) ? jasNizky : 255;
+    jas2 = jasDruhyStandard; 
+    jas3 = 255;
+    if (vsem) { tt13 = 0; tt2 = 0; } else if (zmenaZ8) { tt13 = 20; tt2 = 2; }
     
     posliPrikaz(wled_ips[0], vytvorJson(r1, g1, b1, jas1, tt13));
     posliPrikaz(wled_ips[1], vytvorJson(druhyR, druhyG, druhyB, jas2, tt2));
@@ -66,9 +104,9 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
       g1 = ((2 * baseG) + tg) / 3;
       b1 = ((2 * baseB) + tb) / 3;
       
-      jas1 = 255; 
+      jas1 = (currentSvetlaSeq == 1) ? jasNizky : 255; 
       jas2 = (s8 == 1) ? 3 : jasDruhyStandard;
-      jas3 = 255; 
+      jas3 = 255;
       
       tt13 = 6; // Fáze 1: Náběh
       tt2 = 6;
@@ -77,10 +115,13 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
       posliPrikaz(wled_ips[1], vytvorJson(druhyR, druhyG, druhyB, jas2, tt2));
       posliPrikaz(wled_ips[2], vytvorJson(r1, g1, b1, jas3, tt13));
 
-      delay(250);
+      // Důležité: Nenechávat ESP úplně zastavené pro background procesy sítě
+      for (int k = 0; k < 25; k++) {
+        delay(10);
+      }
 
       tt13 = 15; // Fáze 2: Pokles
-      int klesajiciJas1 = (s8 == 1) ? jasNizky : jasVysoky1;
+      int klesajiciJas1 = (s8 == 1 || currentSvetlaSeq == 1) ? jasNizky : jasVysoky1;
       int klesajiciJas3 = (s8 == 1) ? jasNizky : jasVysoky3;
 
       posliPrikaz(wled_ips[0], vytvorJson(r1, g1, b1, klesajiciJas1, tt13));
@@ -90,15 +131,19 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
       // Návrat do běžné oranžové barvy
       r1 = baseR; g1 = baseG; b1 = baseB;
       
-      jas1 = (s8 == 1) ? jasNizky : jasVysoky1;
+      jas1 = (s8 == 1 || currentSvetlaSeq == 1) ? jasNizky : jasVysoky1;
       jas2 = (s8 == 1) ? 3 : jasDruhyStandard;
       jas3 = (s8 == 1) ? jasNizky : jasVysoky3;
 
       if (currentColorBtn == 1 || currentColorBtn == 2) {
         tt13 = 15; 
         tt2 = 15;
-      } else if (vsem || zmenaZ8) {
+      } else if (vsem) {
+        tt13 = 0; tt2 = 0;
+      } else if (zmenaZ8) {
         tt13 = 20; tt2 = 2;
+      } else {
+        tt13 = 15; tt2 = 15;
       }
 
       posliPrikaz(wled_ips[0], vytvorJson(r1, g1, b1, jas1, tt13));
@@ -111,14 +156,16 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
 void applyModeChange(int stav) {
   if (stav == 3) { 
     // Pracovní mód
-    String servJsonFast = vytvorJson(servR, servG, servB, 255, 5, 0);
-    String servJsonSlow = vytvorJson(servR, servG, servB, 255, 20, 0);
+    String servJsonFast = vytvorJson(servR, servG, servB, 255, 0, 0);
+    String servJsonSlow = vytvorJson(servR, servG, servB, 255, 0, 0);
     posliPrikaz(wled_ips[0], servJsonSlow);
     posliPrikaz(wled_ips[1], servJsonFast);
     posliPrikaz(wled_ips[2], servJsonSlow);
   } else if (stav == 1) { 
     // Vypnuto / Lasery -> Bleskový snap tmy
-    for (int i = 0; i < 3; i++) posliPrikaz(wled_ips[i], "{\"on\":false,\"transition\":0}");
+    posliPrikaz(wled_ips[0], "{\"on\":false,\"transition\":0}");
+    posliPrikaz(wled_ips[1], "{\"on\":false,\"transition\":0}");
+    posliPrikaz(wled_ips[2], "{\"on\":false,\"transition\":0}");
   } else {
     // Návrat do herního módu
     aktualizujSystem(currentColorBtn, currentCrystalsState, false, true);
@@ -132,9 +179,33 @@ void setup() {
   // Pin 16 = RX2 (přijímá z Mozku), Pin 17 = TX2 (odesílá do Mozku)
   Serial2.begin(115200, SERIAL_8N1, 16, 17);
   
-  // Wi-Fi Access Point
-  WiFi.softAPConfig(local_IP, gateway, subnet);
-  WiFi.softAP(ssid, password);
+  // Wi-Fi Stanice (Klient) - pripojeni na existujici AP
+  WiFi.mode(WIFI_STA);
+  if (!WiFi.config(local_IP, gateway, subnet, primaryDNS)) {
+    Serial.println("Chyba nastaveni staticke IP");
+  }
+  WiFi.begin(ssid, password);
+  
+  Serial.print("Pripojovani k WiFi ");
+  Serial.print(ssid);
+  
+  // Zamezi blokaci (komunikace ze serialu muze byt zpracovavana)
+  int pokusy = 0;
+  while (WiFi.status() != WL_CONNECTED && pokusy < 20) {
+    delay(500);
+    Serial.print(".");
+    pokusy++;
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nPripojeno k WiFi!");
+    Serial.print("IP Adresa: ");
+    Serial.println(WiFi.localIP());
+    // Okamzite po zapnuti a pripojeni k wifi aplikovat vychozi (Pracovni) rezim
+    applyModeChange(currentMode);
+  } else {
+    Serial.println("\nChyba: Nepodarilo se pripojit k WiFi (Zkusim znovu za behu).");
+  }
   
   Serial.println("ESP32 WLED Kontroler uspesne nastartoval.");
 }
@@ -170,10 +241,22 @@ void loop() {
         aktualizujSystem(currentColorBtn, currentCrystalsState, true); // true = zmenaZ8 pro lepsi prechod
         Serial.print("Svetla: Stav krystalu zmenen na "); Serial.println(hodnota);
       }
+      else if (prefix == 'S') {
+        // S = Sekvence kaskády světel (0 = klid/konec, 1 = běží animace / zeslabit WLED 1)
+        currentSvetlaSeq = hodnota;
+        aktualizujSystem(currentColorBtn, currentCrystalsState, false);
+        Serial.print("Svetla: Stav sekvence svetel zmenen na "); Serial.println(hodnota);
+      }
       else if (prefix == 'X') {
         // X = Developer Mod
         Serial.print("Svetla: Prepnut Dev Mod na "); Serial.println(hodnota);
       }
     }
+  }
+
+  // Pravidelný ping na WLED zařízení každých 5 sekund
+  if (millis() - lastPingTime > 5000) {
+    lastPingTime = millis();
+    pingWLEDs();
   }
 }

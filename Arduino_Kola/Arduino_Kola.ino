@@ -114,13 +114,17 @@ void handleAnalog(unsigned long ted) {
     int odchylka = abs(hodnota - referencniHodnoty[i]);
     bool aktualneAktivni = (odchylka >= THRESHOLD);
     
-    // Výpisy do Serial Monitoru pouze při změně stavu
+    // Výpisy a logy pouze při změně stavu
     if (aktualneAktivni && !stavPinuAktivni[i]) {
-      Serial.print("[ANALOG] A"); Serial.print(i + 1); Serial.println(" AKTIVNI [!]");
+      char msg[25];
+      sprintf(msg, "A%d AKTIVNI", i + 1);
+      Log(msg);
       stavPinuAktivni[i] = true;
     } 
     else if (!aktualneAktivni && stavPinuAktivni[i]) {
-      Serial.print("[ANALOG] A"); Serial.print(i + 1); Serial.println(" UVOLNEN [ ]");
+      char msg[25];
+      sprintf(msg, "A%d UVOLNEN", i + 1);
+      Log(msg);
       stavPinuAktivni[i] = false;
     }
 

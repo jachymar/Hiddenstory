@@ -6,7 +6,7 @@
 /* --- KONFIGURACE PINŮ A HESLA --- */
 const int tlacitka[] = {2, 3, 4, 5, 6};
 const int pinServoZamek = 9;   
-const int heslo[] = {2, 5, 3, 4}; 
+const int heslo[] = {1, 4, 2, 3}; 
 
 /* --- I2C STAVY --- */
 volatile byte i2cStatus = 0; 
@@ -24,7 +24,9 @@ void Log(const char* txt) {
 }
 
 /* --- PROMĚNNÉ PRO ZÁMEK (Nezávislý Debounce) --- */
-int zadaneHeslo[4];
+int zadaneHeslo[4] = {0, 0, 0, 0};
+int pocetZadanych = 0;
+int pocetChybek = 0;
 int pocitadloStisku = 0;
 const unsigned long CAS_PRO_UVOLNENI = 250; // 250 ms debounce
 
@@ -99,10 +101,10 @@ void loop() {
 }
 
 void handleButtons(unsigned long ted) {
-  // Timeout - resetování rozepsaného hesla po 5s nečinnosti
-  if (pocitadloStisku > 0 && (ted - posledniAktivitaHesla > 5000)) {
-    Log("Timeout zadavani. Resetuji.");
-    pocitadloStisku = 0; 
+  // Timeout - vymazání historie stisků po 5s nečinnosti
+  if (ted - posledniAktivitaHesla > 5000) {
+    for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
+    pocetZadanych = 0;
   }
 
   for (int i = 0; i < 5; i++) {
@@ -116,15 +118,22 @@ void handleButtons(unsigned long ted) {
 
       if (fyzickyStisknuto) {
         posledniAktivitaHesla = ted;
+        pocitadloStisku++; // Počítadlo jen pro diagnostiku (telemetrie)
         
-        if (pocitadloStisku < 4) {
-          zadaneHeslo[pocitadloStisku] = pin;
-          pocitadloStisku++;
-          Serial.print("[KLAVESNICE] Zmáčknuto: "); Serial.print(pin);
-          Serial.print(" (Pozice: "); Serial.print(pocitadloStisku); Serial.println("/4)");
+        int btnId = i + 1; // Převod na "Tlačítko 1 až 5", bez ohledu na to, jaký je to fyzický pin
+
+        // Zápis do bufferu
+        if (pocetZadanych < 4) {
+          zadaneHeslo[pocetZadanych] = btnId;
+          pocetZadanych++;
         }
 
-        if (pocitadloStisku == 4) {
+        char msg[25];
+        sprintf(msg, "Stisk: T%d", btnId);
+        Log(msg);
+
+        // Kontrola hesla po 4 stiscích
+        if (pocetZadanych == 4) {
           bool ok = true;
           for (int j = 0; j < 4; j++) {
             if (zadaneHeslo[j] != heslo[j]) { ok = false; break; }
@@ -133,11 +142,21 @@ void handleButtons(unsigned long ted) {
           if (ok) {
             Log(">>> HESLO SPRAVNE <<<");
             otevriZamek(ted);
+            pocetChybek = 0;
           } else {
-            Log(">>> HESLO NESPRAVNE <<<");
-            i2cStatus = 1; casZmenyI2C = ted; 
+            Log(">>> HESLO SPATNE <<<");
+            pocetChybek++;
+            if (pocetChybek >= 3) {
+              Log(">>> 3x SPATNE <<<");
+              pocetChybek = 0;
+              i2cStatus = 4; // Signalizace chyby pro Mastera
+              casZmenyI2C = ted;
+            }
           }
-          pocitadloStisku = 0; 
+          
+          // Vyčistíme historii pro další pokus
+          pocetZadanych = 0;
+          for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
         }
       }
     }
@@ -166,8 +185,7 @@ void requestEvent() {
 }
 
 void otevriZamek(unsigned long ted) {
-  i2cStatus = 2; 
-  casZmenyI2C = ted;
+  // i2cStatus necháváme 0, aby se neodesílala změna stavu na zelenou na světlech
   servoZamek.write(150); 
   startServoZamek = ted; 
   zamekVakci = true;

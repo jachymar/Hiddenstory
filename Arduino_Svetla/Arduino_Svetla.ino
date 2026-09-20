@@ -4,6 +4,8 @@
 const int pocetSvetel = 4;
 int poradpinu[pocetSvetel] = {9, 6, 3, 5}; 
 const int pinSenzoru = A0;                
+const int pinServo = 10;
+int cilovyUhelServa = 0;
 
 /* --- ČASOVÁNÍ ANIMACE --- */
 const int preDelay = 2500;           // 2,5s předstih pro ESP32
@@ -50,6 +52,16 @@ unsigned long casStartuSekvence = 0;
 unsigned long casZacatkuSviceni = 0;
 unsigned long casVypisu = 0;
 
+// Proměnné pro debounce aktivace senzoru
+unsigned long casZacatkuAktivitySenzoru = 0;
+bool senzorTrvaleAktivni = false;
+const unsigned long DOBA_POTVRZENI_MAGNETU = 300; // Senzor musí být aktivní 300ms v kuse
+
+// Proměnné pro servo a chybovou sekvenci
+volatile bool chybovaSekvenceAktivni = false;
+unsigned long casZacatkuChyby = 0;
+bool servoVPohybu = false;
+
 int stavSvetla[pocetSvetel] = {0, 0, 0, 0};
 int aktualniJas[pocetSvetel] = {0, 0, 0, 0};
 unsigned long casPosledniZmeny[pocetSvetel] = {0, 0, 0, 0};
@@ -72,6 +84,10 @@ DiagSvetla myTelemetry = {0, 0, 0, 0, 0};
 
 void setup() {
   Serial.begin(115200); 
+  
+  pinMode(pinServo, OUTPUT);
+  digitalWrite(pinServo, LOW);
+  cilovyUhelServa = 0;
   
   for (int i = 0; i < pocetSvetel; i++) {
     pinMode(poradpinu[i], OUTPUT);
@@ -103,8 +119,9 @@ void setup() {
   pocetVzorku = 1;
   indexHistorie = 1;
   
-  Serial.print("SYSTEM PRIPRAVEN. Vychozi klidova hodnota: ");
-  Serial.println(klidovaHodnota);
+  char m[30];
+  sprintf(m, "Klid: %d", klidovaHodnota);
+  Log(m);
 }
 
 void loop() {
@@ -135,32 +152,37 @@ void loop() {
     }
   }
 
-  // --- 4. LOGIKA MAGNETU (DELTA AUTO-KALIBRACE) ---
+  // --- 4. LOGIKA MAGNETU (DELTA AUTO-KALIBRACE A DEBOUNCE) ---
   int h = analogRead(pinSenzoru);
   int odchylka = abs(h - klidovaHodnota);
   
   bool senzorVKlidu = (odchylka <= (deltaThreshold / 2));
   bool senzorAktivni = (odchylka > deltaThreshold);
 
-  // DEBUG VÝPIS
-  if (ted - casVypisu > 500) {
-    Serial.print("Akt: "); Serial.print(h);
-    Serial.print(" | Klid(prumer): "); Serial.print(klidovaHodnota);
-    Serial.print(" | Odchylka: "); Serial.print(odchylka);
-    Serial.print(" | I2C Stav: "); Serial.println(i2cStatus);
-    casVypisu = ted;
-  }
-
   // Ochranná lhůta před dalším spuštěním (0.8s musí být v absolutním klidu)
   if (senzorVKlidu && !cyklusBezi) {
     if (casVstupuDoOkna == 0) casVstupuDoOkna = ted;
     if (ted - casVstupuDoOkna > ochrannaLhuta) pripravenoKActivaci = true;
+    casZacatkuAktivitySenzoru = 0;
+    senzorTrvaleAktivni = false;
   } else if (!senzorVKlidu) {
     casVstupuDoOkna = 0; // Magnet se hýbe, resetujeme klidovou lhůtu
+    
+    // Debounce filtrace - ignoruje výkyvy, magnet tam musí být držen trvale
+    if (senzorAktivni) {
+      if (casZacatkuAktivitySenzoru == 0) {
+        casZacatkuAktivitySenzoru = ted;
+      } else if (ted - casZacatkuAktivitySenzoru > DOBA_POTVRZENI_MAGNETU) {
+        senzorTrvaleAktivni = true;
+      }
+    } else {
+      casZacatkuAktivitySenzoru = 0;
+      senzorTrvaleAktivni = false;
+    }
   }
 
-  // SPUŠTĚNÍ SHOW (Kulička je přiložena)
-  if (senzorAktivni && pripravenoKActivaci && !cyklusBezi) {
+  // SPUŠTĚNÍ SHOW (Kulička je přiložena a potvrzena filtrací)
+  if (senzorTrvaleAktivni && pripravenoKActivaci && !cyklusBezi) {
     Log("SHOW START! Kulicka vlozena");
     cyklusBezi = true;
     pripravenoKActivaci = false;
@@ -301,6 +323,31 @@ void loop() {
     }
   }
 
+  // --- 6. LOGIKA SERVA (Chybová sekvence hesel z tlačítek) ---
+  if (chybovaSekvenceAktivni) {
+    if (!servoVPohybu) {
+      cilovyUhelServa = 30;
+      casZacatkuChyby = ted;
+      servoVPohybu = true;
+      Log("Servo: 30 deg");
+    } else if (ted - casZacatkuChyby > 1000) {
+      cilovyUhelServa = 0;
+      chybovaSekvenceAktivni = false;
+      servoVPohybu = false;
+      Log("Servo: 0 deg");
+    }
+  }
+
+  // Softwarové generování PWM pro Servo (bez přerušení, aby nedošlo k ovlivnění pinu 9)
+  static unsigned long lastServoPulse = 0;
+  if (ted - lastServoPulse >= 20) {
+    lastServoPulse = ted;
+    int pulseWidth = map(cilovyUhelServa, 0, 180, 544, 2400);
+    digitalWrite(pinServo, HIGH);
+    delayMicroseconds(pulseWidth);
+    digitalWrite(pinServo, LOW);
+  }
+
   // Aktualizace telemetrie pro ESP32
   myTelemetry.status = i2cStatus;
   myTelemetry.mode_running = cyklusBezi ? 1 : 0;
@@ -325,7 +372,11 @@ void requestEvent() {
 void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read(); 
-    if (c == 0x99 || c == 0x98) i2c_req = c;
+    if (c == 0x99 || c == 0x98) {
+      i2c_req = c;
+    } else if (c == 'E') {
+      chybovaSekvenceAktivni = true;
+    }
   }
 }
 

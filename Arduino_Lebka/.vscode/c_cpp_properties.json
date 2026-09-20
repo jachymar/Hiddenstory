@@ -6,8 +6,8 @@
                 "${workspaceFolder}/**",
                 "C:\\Users\\Rezac\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\1.8.8\\cores\\arduino",
                 "C:\\Users\\Rezac\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\1.8.8\\variants\\standard",
-                "c:\\Users\\Rezac\\OneDrive\\Dokumenty\\Arduino\\libraries\\OneWireHub\\src",
-                "C:\\Users\\Rezac\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\1.8.8\\libraries\\Wire\\src",
+                "C:\\Users\\Rezac\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\avr\\1.8.8\\libraries\\SoftwareSerial\\src",
+                "c:\\Users\\Rezac\\OneDrive\\Dokumenty\\Arduino\\libraries\\Servo\\src",
                 "C:\\Users\\Rezac\\AppData\\Local\\Arduino15\\packages\\arduino\\tools\\avr-gcc\\7.3.0-atmel3.6.1-arduino7\\avr\\include"
             ],
             "forcedInclude": [

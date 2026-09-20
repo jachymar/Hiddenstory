@@ -227,6 +227,47 @@
         }
 
         /* TERMINAL / DIAGNOSTICS */
+        .system-health {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 0.5rem;
+            margin-top: 1rem;
+            margin-bottom: 1rem;
+            background: #0f1322;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .health-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            padding: 0.3rem;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.02);
+        }
+
+        .health-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--status-red);
+            flex-shrink: 0;
+            box-shadow: 0 0 5px rgba(239, 68, 68, 0.4);
+        }
+
+        .health-item.ok .health-dot {
+            background-color: var(--status-green);
+            box-shadow: 0 0 5px rgba(16, 185, 129, 0.4);
+        }
+
+        .health-item.ok {
+            color: var(--text-main);
+        }
+
         .terminal-container {
             background-color: #050505;
             border: 1px solid #222;
@@ -275,7 +316,10 @@
     <div class="dashboard-container">
         
         <header class="header">
-            <h1>Hidden Story <strong>Operator</strong></h1>
+            <div style="display: flex; flex-direction: column;">
+                <h1>Hidden Story <strong>Operator</strong></h1>
+                <button id="btnConnectUsb" class="btn-outline" style="font-size: 0.75rem; padding: 0.3rem 0.6rem; width: auto; margin-top: 0.5rem; align-self: flex-start;" onclick="connectUsb()">Připojit přes USB (Web Serial)</button>
+            </div>
             <div id="statusBadge" class="status-indicator">
                 <div class="status-dot"></div>
                 <span id="statusText">Odpojeno</span>
@@ -309,8 +353,22 @@
                     <label style="font-size: 0.8rem; color: var(--text-muted);">IP ESP32:</label>
                     <input type="text" id="ipAddress" value="192.168.1.100" style="background: #111; border: 1px solid #333; color: #fff; padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">
                 </div>
+
+                <h3 style="font-size: 0.85rem; color: var(--text-muted); margin: 0 0 0.5rem 0; text-transform: uppercase;">Stav Komponent</h3>
+                <div class="system-health" id="systemHealth">
+                    <div class="health-item" id="h-laser"><div class="health-dot"></div>Laser (13)</div>
+                    <div class="health-item" id="h-tlac"><div class="health-dot"></div>Tlačítka (11)</div>
+                    <div class="health-item" id="h-lebka"><div class="health-dot"></div>Lebka (15)</div>
+                    <div class="health-item" id="h-kola"><div class="health-dot"></div>Kola (12)</div>
+                    <div class="health-item" id="h-svetla"><div class="health-dot"></div>Světla (14)</div>
+                    <div class="health-item" id="h-m3"><div class="health-dot"></div>ESP M3 (WiFi)</div>
+                    <div class="health-item" id="h-tukani"><div class="health-dot"></div>Ťukání (20)</div>
+                    <div class="health-item" id="h-audio3"><div class="health-dot"></div>Audio3 (21)</div>
+                    <div class="health-item" id="h-lcd"><div class="health-dot"></div>LCD (0x27)</div>
+                </div>
+
                 <div style="margin-bottom: 1rem;">
-                    <label style="font-size: 0.8rem; color: var(--text-muted);">Vyberte modul pro diagnostiku:</label>
+                    <label style="font-size: 0.8rem; color: var(--text-muted);">Vyberte modul pro detailní diagnostiku:</label>
                     <select id="moduleSelect" onchange="selectModule(this.value)" style="width:100%; padding:0.5rem; background:#111; color:#fff; border:1px solid #333; border-radius:4px; margin-top:0.5rem; font-size:0.9rem;">
                         <option value="0">-- Žádný (Vypnuto) --</option>
                         <option value="1">Modul 1: Lebka</option>
@@ -321,11 +379,22 @@
                         <option value="6">Místnost 3: ESP32 (Ťukání + Audio)</option>
                     </select>
                 </div>
+                
+                <!-- TLAČÍTKA PRO KONKRÉTNÍ MODUL A NÁSTROJE -->
+                <div id="moduleActions" style="display: none; gap: 0.5rem; margin-bottom: 1rem;">
+                    <button class="btn-outline" style="font-size: 0.8rem; padding: 0.5rem; flex: 1;" onclick="setDiagMode('sensors')">Hodnoty senzorů</button>
+                    <button class="btn-outline" style="font-size: 0.8rem; padding: 0.5rem; flex: 1;" onclick="setDiagMode('logs')">Serial log</button>
+                </div>
+
+                <div style="margin-bottom: 1rem;">
+                    <button class="btn-warning" style="font-size: 0.8rem; padding: 0.5rem;" onclick="sendCommand('I')">Spustit I2C Skener (Test Sběrnice)</button>
+                </div>
+
                 <div class="terminal-container" style="display:flex; flex-direction:column; height: 350px;">
-                    <div id="diagStatus" style="flex: 1; border-bottom: 1px solid #333; padding-bottom: 0.5rem; margin-bottom: 0.5rem; white-space: pre-wrap; color: #38bdf8; font-family: 'Consolas', monospace; font-size: 0.85rem;">
-                        Inicializace diagnostického streamu...
+                    <div id="diagStatus" style="flex: 1; overflow-y: auto; padding-bottom: 0.5rem; margin-bottom: 0.5rem; white-space: pre-wrap; color: #38bdf8; font-family: 'Consolas', monospace; font-size: 0.85rem;">
+                        Vyberte modul pro diagnostiku...
                     </div>
-                    <div id="diagTerminal" style="flex: 1; overflow-y: auto; color: #22c55e; font-family: 'Consolas', monospace; font-size: 0.85rem;">
+                    <div id="diagTerminal" style="display: none; flex: 1; overflow-y: auto; color: #22c55e; font-family: 'Consolas', monospace; font-size: 0.85rem;">
                         <div style="color: #666;">--- Historie Logů ---</div>
                     </div>
                 </div>
@@ -344,6 +413,12 @@
         let devMode = false;
         let isConnected = false;
         let lastLogMessage = "";
+        let currentDiagMode = 'sensors';
+
+        // --- PROMĚNNÉ PRO USB SERIAL ---
+        let serialPort = null;
+        let serialWriter = null;
+        let serialReader = null;
 
         const statusBadge = document.getElementById('statusBadge');
         const statusText = document.getElementById('statusText');
@@ -373,7 +448,135 @@
             return ip;
         }
 
+        function updateHealthDot(id, isOk) {
+            const el = document.getElementById(id);
+            if (el) {
+                if (isOk) el.classList.add('ok');
+                else el.classList.remove('ok');
+            }
+        }
+
+        function handleTelemetryData(data) {
+            if (!isConnected) {
+                isConnected = true;
+                statusText.textContent = serialPort ? 'Připojeno (USB)' : 'Připojeno (IP)';
+                statusBadge.classList.add('connected');
+            }
+
+            if (devMode && data.online) {
+                // Aktualizace panelu "Stav Komponent" na základě tvrdých True/False z I2C sběrnice
+                updateHealthDot('h-laser', data.online.laser === 1);
+                updateHealthDot('h-tlac', data.online.tlacitka === 1);
+                updateHealthDot('h-lebka', data.online.lebka === 1);
+                updateHealthDot('h-kola', data.online.kola === 1);
+                updateHealthDot('h-svetla', data.online.svetla === 1);
+                updateHealthDot('h-lcd', data.online.lcd === 1);
+                
+                // Místnost 3
+                updateHealthDot('h-m3', data.online.m3 === 1);
+                updateHealthDot('h-tukani', data.online.m3_tukani === 1);
+                updateHealthDot('h-audio3', data.online.m3_audio3 === 1);
+
+                if (data.diag_text) {
+                    diagStatus.textContent = data.diag_text;
+                    
+                    if (data.diag_log && data.diag_log !== lastLogMessage && data.diag_log !== "Start" && data.diag_log !== "") {
+                        lastLogMessage = data.diag_log;
+                        const time = new Date().toLocaleTimeString('cs-CZ');
+                        const logDiv = document.createElement('div');
+                        logDiv.innerHTML = `<span style="color:#888">[${time}]</span> ${data.diag_log}`;
+                        diagTerminal.appendChild(logDiv);
+                        diagTerminal.scrollTop = diagTerminal.scrollHeight;
+                    }
+                } else {
+                    diagStatus.textContent = JSON.stringify(data, null, 2);
+                }
+            }
+        }
+
+        async function connectUsb() {
+            if (!('serial' in navigator)) {
+                alert('Váš prohlížeč nepodporuje Web Serial API. Použijte Chrome, Edge nebo Operu.');
+                return;
+            }
+            
+            try {
+                serialPort = await navigator.serial.requestPort();
+                await serialPort.open({ baudRate: 115200 });
+                
+                serialWriter = serialPort.writable.getWriter();
+                const textDecoder = new TextDecoderStream();
+                serialPort.readable.pipeTo(textDecoder.writable);
+                serialReader = textDecoder.readable.getReader();
+                
+                document.getElementById('btnConnectUsb').textContent = 'USB Připojeno (Odpojit restartem stránky)';
+                document.getElementById('btnConnectUsb').style.color = 'var(--status-green)';
+                document.getElementById('btnConnectUsb').style.borderColor = 'var(--status-green)';
+                
+                readSerialLoop();
+                sendCommand("GET_STATE"); // Okamžitá žádost o data po připojení
+            } catch (err) {
+                console.error('Chyba USB připojení:', err);
+            }
+        }
+
+        async function readSerialLoop() {
+            let buffer = "";
+            try {
+                while (true) {
+                    const { value, done } = await serialReader.read();
+                    if (done) break;
+                    if (value) {
+                        buffer += value;
+                        let lines = buffer.split('\n');
+                        buffer = lines.pop(); // Poslední nekompletní řádek si necháme na příště
+                        
+                        for (let line of lines) {
+                            line = line.trim();
+                            if (line.startsWith("TELEMETRY:")) {
+                                try {
+                                    handleTelemetryData(JSON.parse(line.substring(10)));
+                                } catch(e) {}
+                            } else if (devMode && currentDiagMode === 'logs' && line.length > 0 && !line.startsWith("{")) {
+                                // Vypisujeme všechna klasická serial hlášení od ESP32 do okna logů
+                                const time = new Date().toLocaleTimeString('cs-CZ');
+                                const logDiv = document.createElement('div');
+                                logDiv.innerHTML = `<span style="color:#f59e0b">[ESP]</span> <span style="color:#888">[${time}]</span> ${line}`;
+                                diagTerminal.appendChild(logDiv);
+                                diagTerminal.scrollTop = diagTerminal.scrollHeight;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("USB odpojeno", e);
+                serialPort = null;
+                isConnected = false;
+                statusText.textContent = 'Odpojeno';
+                statusBadge.classList.remove('connected');
+                document.getElementById('btnConnectUsb').textContent = 'Připojit přes USB (Web Serial)';
+                document.getElementById('btnConnectUsb').style.color = '';
+                document.getElementById('btnConnectUsb').style.borderColor = '';
+            }
+        }
+
+        function setDiagMode(mode) {
+            currentDiagMode = mode;
+            if (mode === 'sensors') {
+                diagStatus.style.display = 'block';
+                diagTerminal.style.display = 'none';
+            } else if (mode === 'logs') {
+                diagStatus.style.display = 'none';
+                diagTerminal.style.display = 'block';
+            }
+        }
+
         function selectModule(val) {
+            if (val == 0) {
+                document.getElementById('moduleActions').style.display = 'none';
+            } else {
+                document.getElementById('moduleActions').style.display = 'flex';
+            }
             sendCommand('D' + val);
             diagStatus.textContent = "Vyžádání dat z modulu " + val + "...";
             diagTerminal.innerHTML = '<div style="color: #666;">--- Historie Logů Modulu ' + val + ' ---</div>';
@@ -381,6 +584,8 @@
         }
 
         async function fetchState() {
+            if (serialPort) return; // Pokud jedeme přes USB, ignorujeme HTTP (síťové) dotazy
+
             const baseUrl = getBaseUrl();
             if (!baseUrl) return;
 
@@ -393,29 +598,7 @@
 
                 if (response.ok) {
                     const data = await response.json();
-                    
-                    if (!isConnected) {
-                        isConnected = true;
-                        statusText.textContent = 'Připojeno';
-                        statusBadge.classList.add('connected');
-                    }
-
-                    if (devMode) {
-                        if (data.diag_text) {
-                            diagStatus.textContent = data.diag_text;
-                            
-                            if (data.diag_log && data.diag_log !== lastLogMessage && data.diag_log !== "Start" && data.diag_log !== "") {
-                                lastLogMessage = data.diag_log;
-                                const time = new Date().toLocaleTimeString('cs-CZ');
-                                const logDiv = document.createElement('div');
-                                logDiv.innerHTML = `<span style="color:#888">[${time}]</span> ${data.diag_log}`;
-                                diagTerminal.appendChild(logDiv);
-                                diagTerminal.scrollTop = diagTerminal.scrollHeight;
-                            }
-                        } else {
-                            diagStatus.textContent = JSON.stringify(data, null, 2);
-                        }
-                    }
+                    handleTelemetryData(data);
                 } else {
                     throw new Error('Chyba serveru');
                 }
@@ -430,7 +613,7 @@
 
         // Automatický start dotazování po načtení stránky
         fetchState();
-        setInterval(fetchState, 500);
+        setInterval(fetchState, 1500); // 1500ms místo 500ms kvůli limitaci ENC28J60 socketů (zamezí odpojování a zahlcení)
 
         function toggleDevMode() {
             if (!devMode) {
@@ -457,6 +640,13 @@
         }
 
         async function sendCommand(cmd) {
+            if (serialPort && serialWriter) {
+                const encoder = new TextEncoder();
+                await serialWriter.write(encoder.encode(cmd + '\n'));
+                console.log('USB Odesláno:', cmd);
+                return;
+            }
+
             const baseUrl = getBaseUrl();
             if (!baseUrl) {
                 alert('Chybí IP adresa!');

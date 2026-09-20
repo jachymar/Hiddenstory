@@ -64,6 +64,21 @@
         "${file}"
       ],
       "problemMatcher": []
+    },
+    {
+      "label": "Arduino: Upload Active File (ESP32 - COM5)",
+      "type": "process",
+      "command": "C:\\Program Files\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe",
+      "args": [
+        "compile",
+        "--upload",
+        "-p",
+        "COM5",
+        "--fqbn",
+        "esp32:esp32:esp32",
+        "${file}"
+      ],
+      "problemMatcher": []
     }
   ]
 }

@@ -3,7 +3,7 @@ const int PIEZO_PIN = A1;            // Senzor na pinu A1
 const int OUTPUT_PIN = 8;            // Hlavní akční pin (2 s při úspěchu)
 const int STATUS_PIN = 9;            // Stavový pin (bzučák/LED)
 
-const int THRESHOLD = 50;            // Citlivost senzoru
+const int THRESHOLD = 100;            // Citlivost senzoru
 const unsigned long DEBOUNCE_TIME_MS = 150;  // Debounce mezi jednotlivými ťuknutími
 const unsigned long RESET_TIMEOUT_MS = 3000;  // Reset paměti po 3 s nečinnosti
 const unsigned long LOCK_TIME_MS = 2000;      // Doba, po kterou zůstane výstup pin 8 aktivní
@@ -64,11 +64,15 @@ unsigned long lastTapEventTime = 0;
 long measuredIntervals[RHYTHM_LENGTH];
 
 // --- PROMĚNNÉ PRO NEBLOKUJÍCÍ PÍPÁNÍ A ZÁMEK ---
-unsigned long beepEndTime = 0;
-bool isBeeping = false;
 unsigned long lockEndTime = 0;
 bool isUnlocked = false;
 bool piezoWasHigh = false;
+unsigned long statusResetTime = 0;
+
+void triggerBeep() {
+  i2cStatus = 1; // 1 = Požadavek na pípnutí (chyba / první dotek)
+  statusResetTime = millis() + 500; // Po půl sekundě se stav sám vrátí na 0
+}
 
 void setup() {
   Serial.begin(115200);
@@ -90,15 +94,16 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
-  // 1. NEBLOKUJÍCÍ OBSLUHA HARDWARU
-  if (isBeeping && currentMillis >= beepEndTime) {
-    digitalWrite(STATUS_PIN, LOW);
-    isBeeping = false;
+  // Reset I2C stavu (pípnutí) zpět do klidu
+  if (i2cStatus == 1 && currentMillis >= statusResetTime) {
+    i2cStatus = 0;
   }
 
+  // 1. NEBLOKUJÍCÍ OBSLUHA HARDWARU
   if (isUnlocked && currentMillis >= lockEndTime) {
     digitalWrite(OUTPUT_PIN, LOW);
     isUnlocked = false;
+    i2cStatus = 0; // Odemčení skončilo, reset statusu
     resetRhythm();
   }
 
@@ -109,6 +114,7 @@ void loop() {
     digitalWrite(OUTPUT_PIN, HIGH);
     lockEndTime = currentMillis + LOCK_TIME_MS;
     isUnlocked = true;
+    i2cStatus = 2; // Úspěch
   }
 
   // 2. DETEKCE KLEPNUTÍ (jen na náběžné hraně)
@@ -129,7 +135,7 @@ void loop() {
   // 3. Timeout reset po 3 sekundách nečinnosti
   if (lastTapTime > 0 && (currentMillis - lastTapTime) > RESET_TIMEOUT_MS) {
     Log("Dlouha pauza. Mazu pamet.");
-    triggerBeep(BEEP_TIME_MS);
+    triggerBeep(); // Pípnutí přes I2C
     resetRhythm();
   }
 
@@ -145,7 +151,7 @@ void handleTap(unsigned long currentTime) {
   if (lastTapTime == 0) {
     Log("Prvni tuknuti zaznamenano...");
     lastTapTime = currentTime;
-    triggerBeep(BEEP_TIME_MS);
+    triggerBeep(); // Pípnutí přes I2C
     return;
   }
 
@@ -165,9 +171,9 @@ void handleTap(unsigned long currentTime) {
     intervalCount++;
   }
 
-  Serial.print("✅ T'uknuti (interval: ");
-  Serial.print(elapsedTime);
-  Serial.println(" ms)");
+  char tMsg[25];
+  sprintf(tMsg, "Tuk: %ld ms", elapsedTime);
+  Log(tMsg);
 
   lastTapTime = currentTime;
 
@@ -196,29 +202,14 @@ bool evaluateRhythm() {
   float finalScaleFactor = sumOfMeasuredTimes / sumOfPatternTimes;
   bool rhythmSuccess = true;
 
-  Serial.print("--- KONTROLA POSLEDNICH 5 INTERVALU (Scale: x");
-  Serial.print(finalScaleFactor);
-  Serial.println(") ---");
-
+  // Kontrola intervalů bez zbytečného spamu
   for (int i = 0; i < RHYTHM_LENGTH; i++) {
     long expectedScaledTime = RHYTHM_PATTERN[i] * finalScaleFactor;
     long minTime = expectedScaledTime * (1.0 - RATIO_TOLERANCE);
     long maxTime = expectedScaledTime * (1.0 + RATIO_TOLERANCE);
 
-    Serial.print("Int ");
-    Serial.print(i + 1);
-    Serial.print(": ");
-    Serial.print(measuredIntervals[i]);
-
     if (measuredIntervals[i] < minTime || measuredIntervals[i] > maxTime) {
-      Serial.print(" ms ❌ (Cil: ");
-      Serial.print(expectedScaledTime);
-      Serial.println(")");
       rhythmSuccess = false;
-    } else {
-      Serial.print(" ms ✅ (Cil: ");
-      Serial.print(expectedScaledTime);
-      Serial.println(")");
     }
   }
 
@@ -227,6 +218,7 @@ bool evaluateRhythm() {
     digitalWrite(OUTPUT_PIN, HIGH);
     lockEndTime = millis() + LOCK_TIME_MS;
     isUnlocked = true;
+    i2cStatus = 2; // ESP32 zaznamená úspěch a pošle D do Audia
 
     return true;
   } else {
@@ -236,9 +228,7 @@ bool evaluateRhythm() {
 }
 
 void triggerBeep(unsigned long duration) {
-  digitalWrite(STATUS_PIN, HIGH);
-  beepEndTime = millis() + duration;
-  isBeeping = true;
+  triggerBeep(); // Přesměrovat původní kód na náš nový I2C trigger
 }
 
 void resetRhythm() {
@@ -249,5 +239,5 @@ void resetRhythm() {
     measuredIntervals[i] = 0;
   }
 
-  Serial.println("\n--- Pripraven na novou sekvenci ---");
+  Log("Pripraven na novou sekvenci");
 }
