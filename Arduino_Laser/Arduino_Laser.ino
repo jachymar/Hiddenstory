@@ -1,7 +1,7 @@
 /*
  * Laserová závora - Arduino SLAVE
  * I2C adresa: 13
- * Cooldown: 16s (tlačítka ignorována)
+ * Cooldown alarmu: 16s
  * I2C Alert čas (stav 1): 17s
  * Threshold: 20
  */
@@ -42,32 +42,86 @@ bool isCoolingDown = false;
 bool alignmentMode = false;
 bool buttonsPressed = false;
 bool laserIsOn = false;
+bool laserEnabled = false; // Laser je povolen Masterem (dveře otevřeny > 3s nebo pracovní mód)
 bool pracovniMod = false; // Příznak pro pracovní mód
 
 volatile byte i2cStatus = 0;
 byte lastStatusPrint = 255;
 int ldrValue = 0;
 volatile byte i2c_req = 0;
+volatile char pendingSerialCmd = 0;
 char lastLog[30] = "Start";
-String lebkaData = "0";
-String lebkaLog = "Start";
-char bridgeCommand = 0;
+
+// Přidáme bezpečné buffery pro I2C přenos bez Stringů uvnitř přerušení
+volatile char safeLebkaStatus[4] = "0";
+volatile char safeLebkaData[40] = "0,0,0,0,0,0";
+volatile char safeLebkaLog[35] = "Start";
+
+unsigned long lastLebkaPoll = 0;
+unsigned long lastLebkaResponseTime = 0;
 
 void pollLebkaBridge() {
+  // Odeslání požadavku z fronty z I2C
+  if (pendingSerialCmd != 0) {
+    lebkaSerial.write(pendingSerialCmd);
+    pendingSerialCmd = 0;
+  }
+
+  // Příjem dat z Lebky
+  static String recvBuffer = "";
   while (lebkaSerial.available()) {
-    String msg = lebkaSerial.readStringUntil('\n');
-    msg.trim();
-    if (msg.length() == 0) continue;
+    char c = lebkaSerial.read();
+    if (c == '\n') {
+      String msg = recvBuffer;
+      recvBuffer = "";
+      msg.trim();
+      if (msg.length() == 0) continue;
 
-    if (bridgeCommand == 'S') {
-      lebkaData = msg;
-    } else if (bridgeCommand == 'D') {
-      lebkaData = msg;
-    } else if (bridgeCommand == 'L') {
-      lebkaLog = msg;
+      lastLebkaResponseTime = millis();
+
+      if (msg.indexOf(',') != -1) {
+        // Telemetrie: stavHry,crystals_mask,k1,k2,k3,lock
+        int c1 = msg.indexOf(',');
+        int c2 = msg.indexOf(',', c1 + 1);
+        int mask = (c2 != -1) ? msg.substring(c1 + 1, c2).toInt() : 0;
+        
+        noInterrupts();
+        strncpy((char*)safeLebkaData, msg.c_str(), 39);
+        safeLebkaData[39] = '\0';
+        strcpy((char*)safeLebkaStatus, (mask == 7) ? "2" : "0");
+        interrupts();
+      } else if (msg.startsWith("LOG:")) {
+        noInterrupts();
+        strncpy((char*)safeLebkaLog, msg.substring(4).c_str(), 34);
+        safeLebkaLog[34] = '\0';
+        interrupts();
+      } else if (msg == "OK") {
+        // Potvrzení příkazu
+      } else {
+        noInterrupts();
+        strncpy((char*)safeLebkaStatus, msg.c_str(), 3);
+        safeLebkaStatus[3] = '\0';
+        interrupts();
+      }
+    } else {
+      if (recvBuffer.length() < 50) {
+        recvBuffer += c;
+      }
     }
+  }
 
-    bridgeCommand = 0;
+  // Pravidelné cyklické vyčítání z Lebky každých 150 ms
+  if (millis() - lastLebkaPoll >= 150) {
+    lastLebkaPoll = millis();
+    lebkaSerial.write('D');
+  }
+
+  // Timeout detekce Lebky (pokud neodpoví déle než 2.5 sekundy, označí se offline)
+  if (millis() - lastLebkaResponseTime > 2500 && lastLebkaResponseTime > 0) {
+    noInterrupts();
+    strcpy((char*)safeLebkaData, "X");
+    strcpy((char*)safeLebkaStatus, "X");
+    interrupts();
   }
 }
 
@@ -85,7 +139,10 @@ void setup() {
   Serial.begin(115200);
   Serial.println(F("--- SYSTEM AKTIVNI ---"));
   
-  attemptToTurnOn();
+  // Laser startuje vypnutý, dokud Master nepotvrdí otevření dveří nebo pracovní mód
+  digitalWrite(PIN_LASER, LOW);
+  laserIsOn = false;
+  laserEnabled = false;
 }
 
 void loop() {
@@ -108,25 +165,44 @@ void loop() {
     i2cStatus = 0;
   }
 
+  // V pracovním módu nebo když je laser vypnutý nesmí být aktivní žádný alarm
+  if (pracovniMod || !laserEnabled) {
+    i2cStatus = 0;
+  }
+
   checkStatusPrint();
 
-  // --- PRIORITA 1: TLAČÍTKA (Povolena pouze pokud NEBĚŽÍ cooldown) ---
-  if (!isCoolingDown) {
-    if (anyButton) {
-      if (!buttonsPressed && laserIsOn) {
+  // Pokud není laser povolen (dveře zavřeny) a nejsme v pracovním módu, laser zůstává vypnutý
+  if (!laserEnabled && !pracovniMod) {
+    if (laserIsOn) {
+      digitalWrite(PIN_LASER, LOW);
+      laserIsOn = false;
+    }
+    return;
+  }
+
+  // --- PRIORITA 1: TLAČÍTKA (Fungují VŽDY pro chvilkové vypnutí laseru) ---
+  if (anyButton) {
+    if (!buttonsPressed) {
+      if (laserIsOn) {
         effectFadeOut();
-        laserIsOn = false;
       }
       digitalWrite(PIN_LASER, LOW);
+      laserIsOn = false;
+      isCoolingDown = false;
+      alignmentMode = false;
       buttonsPressed = true;
-      return;
     }
+    digitalWrite(PIN_LASER, LOW);
+    return;
+  }
 
-    if (buttonsPressed && !anyButton) {
-      buttonsPressed = false;
+  if (buttonsPressed && !anyButton) {
+    buttonsPressed = false;
+    if (laserEnabled || pracovniMod) {
       attemptToTurnOn();
-      return;
     }
+    return;
   }
 
   // --- PRIORITA 2: ALIGNMENT MÓD ---
@@ -145,7 +221,9 @@ void loop() {
   if (isCoolingDown) {
     if (millis() - cooldownTimer >= COOLDOWN) {
       isCoolingDown = false;
-      attemptToTurnOn();
+      if (laserEnabled || pracovniMod) {
+        attemptToTurnOn();
+      }
     }
     return;
   }
@@ -157,50 +235,72 @@ void loop() {
         triggerAlarm();
       }
     }
+  } else if (laserEnabled || pracovniMod) {
+    attemptToTurnOn();
   }
 }
 
 void requestEvent() {
   if (i2c_req == 0x99) {
-    Wire.write((byte*)&myTelemetry, sizeof(DiagLaser)); 
+    Wire.write((const byte*)&myTelemetry, sizeof(DiagLaser)); 
     i2c_req = 0;
   } else if (i2c_req == 0x98) {
-    Wire.write((byte*)lastLog, 30);
+    Wire.write((const byte*)lastLog, 30);
     i2c_req = 0;
-  } else if (i2c_req == 'S' || i2c_req == 'D' || i2c_req == 'L' || i2c_req == 'A') {
-    if (i2c_req == 'S') {
-      Wire.write((const uint8_t*)lebkaData.c_str(), lebkaData.length());
-    } else if (i2c_req == 'D') {
-      Wire.write((const uint8_t*)lebkaData.c_str(), lebkaData.length());
-    } else if (i2c_req == 'L') {
-      Wire.write((const uint8_t*)lebkaLog.c_str(), lebkaLog.length());
-    } else if (i2c_req == 'A') {
-      const char *ack = "OK";
-      Wire.write((const uint8_t*)ack, 2);
-    }
+  } else if (i2c_req == 'S') {
+    Wire.write((const uint8_t*)safeLebkaStatus, strlen((char*)safeLebkaStatus));
+    i2c_req = 0;
+  } else if (i2c_req == 'D') {
+    Wire.write((const uint8_t*)safeLebkaData, strlen((char*)safeLebkaData));
+    i2c_req = 0;
+  } else if (i2c_req == 'L') {
+    Wire.write((const uint8_t*)safeLebkaLog, strlen((char*)safeLebkaLog));
+    i2c_req = 0;
+  } else if (i2c_req == 'A') {
+    const char *ack = "OK";
+    Wire.write((const uint8_t*)ack, 2);
     i2c_req = 0;
   } else {
-    Wire.write(i2cStatus);
+    Wire.write(pracovniMod ? (byte)0 : i2cStatus);
   }
 }
 
 void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read();
-    if (c == 0x99 || c == 0x98) {
+    if (c == 0x99 || c == 0x98 || c == 'S' || c == 'D' || c == 'L') {
       i2c_req = c;
-    } else if (c == 'A' || c == 'S' || c == 'D' || c == 'L') {
-      bridgeCommand = (char)c;
+    } else if (c == 'A') {
       i2c_req = c;
-      lebkaSerial.write((char)c);
-      delay(10);
-      pollLebkaBridge();
+      pendingSerialCmd = 'A';
     } else if (c == '0') {
       pracovniMod = false;
+      pendingSerialCmd = '0';
       Log("Herni mod - detekce zapnuta");
     } else if (c == '3') {
       pracovniMod = true;
-      Log("Pracovni mod - laser ignoruje preruseni");
+      i2cStatus = 0;
+      laserEnabled = true;
+      pendingSerialCmd = '3';
+      Log("Pracovni mod - laser zapnut, ignoruje preruseni");
+      attemptToTurnOn();
+    } else if (c == 'N') { // Zapnout laser (dveře otevřeny > 3s)
+      laserEnabled = true;
+      if (!laserIsOn && !isCoolingDown && !alignmentMode && !buttonsPressed) {
+        attemptToTurnOn();
+      }
+      Log("Povel: Laser ZAPNUT (dvere otevreny)");
+    } else if (c == 'F') { // Vypnout laser (dveře zavřeny)
+      laserEnabled = false;
+      if (laserIsOn) {
+        effectFadeOut();
+      }
+      digitalWrite(PIN_LASER, LOW);
+      laserIsOn = false;
+      i2cStatus = 0;
+      isCoolingDown = false;
+      alignmentMode = false;
+      Log("Povel: Laser VYPNUT (dvere zavreny)");
     }
   }
 }
@@ -215,6 +315,7 @@ void checkStatusPrint() {
 }
 
 void triggerAlarm() {
+  if (pracovniMod) return; // V pracovním módu nikdy nespouštět alarm
   Log("PRERUSENO! Poplach.");
   i2cStatus = 1;      
   i2cTimer = millis(); 
@@ -225,6 +326,8 @@ void triggerAlarm() {
 }
 
 void attemptToTurnOn() {
+  if (!laserEnabled && !pracovniMod) return; // Pojistka - laser se nezapne, pokud neni povolen
+
   effectOldBulb(); 
   delay(SENSOR_STABILIZE); 
   
@@ -232,7 +335,7 @@ void attemptToTurnOn() {
   analogRead(PIN_LDR);
   int checkLDR = analogRead(PIN_LDR);
   
-  if (checkLDR > LDR_THRESHOLD) {
+  if (checkLDR > LDR_THRESHOLD || pracovniMod) {
     failCounter = 0;
     laserIsOn = true;
     digitalWrite(PIN_LASER, 255);
@@ -246,7 +349,9 @@ void attemptToTurnOn() {
       alignmentMode = true;
       Log("Alignment mode aktivni.");
     } else {
-      triggerAlarm(); 
+      if (!pracovniMod) {
+        triggerAlarm(); 
+      }
     }
   }
 }

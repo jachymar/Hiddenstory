@@ -5,11 +5,11 @@
 
 /* --- KONFIGURACE PINŮ A HODNOT --- */
 const int pinServoAnalog = 10; 
-const int analogPiny[] = {A1, A2, A3};
+const int analogPiny[] = {A0, A1, A2};
 
-// Tvé přesně naměřené klidové hodnoty
-const int referencniHodnoty[] = {528, 493, 497}; 
-const int THRESHOLD = 40; // Minimální změna nutná k aktivaci
+// Tvé přesně naměřené klidové hodnoty (špatně)
+const int referencniHodnoty[] = {532, 496, 499}; 
+const int THRESHOLD = 40; // Minimální změna nutná k aktivaci (správně: A0=438, A1=415, A2=356)
 
 /* --- I2C STAVY --- */
 volatile byte i2cStatus = 0; 
@@ -33,6 +33,7 @@ unsigned long startCasResetuAnalog = 0;
 unsigned long startServoAnalog = 0;
 bool analogServoVakci = false;
 bool aktivaceDokoncena = false; 
+bool pracovniMod = false; 
 
 Servo servoAnalog;
 
@@ -57,7 +58,8 @@ void setup() {
   Serial.println("==========================================");
   Serial.println("       MODUL 2: ANALOGY STARTUJÍ          ");
   Serial.println("==========================================");
-  Serial.println("- Pevná kalibrace: A1=528, A2=493, A3=497");
+  Serial.println("- Pevná kalibrace: A0=532, A1=496, A2=499");
+  Serial.println("- Cílové hodnoty:  A0=438, A1=415, A2=356");
   Serial.println("- Threshold: Změna o 40 jednotek");
   Serial.println("- Aktivace: 1.5s | Reset: 1.0s");
   Serial.println("- I2C Adresa: 12 | Čekám na příkaz 'C'");
@@ -117,13 +119,13 @@ void handleAnalog(unsigned long ted) {
     // Výpisy a logy pouze při změně stavu
     if (aktualneAktivni && !stavPinuAktivni[i]) {
       char msg[25];
-      sprintf(msg, "A%d AKTIVNI", i + 1);
+      sprintf(msg, "A%d AKTIVNI", i);
       Log(msg);
       stavPinuAktivni[i] = true;
     } 
     else if (!aktualneAktivni && stavPinuAktivni[i]) {
       char msg[25];
-      sprintf(msg, "A%d UVOLNEN", i + 1);
+      sprintf(msg, "A%d UVOLNEN", i);
       Log(msg);
       stavPinuAktivni[i] = false;
     }
@@ -141,8 +143,10 @@ void handleAnalog(unsigned long ted) {
     }
     
     if (startCasPodminkyAnalog != 0 && (ted - startCasPodminkyAnalog >= 1500) && !aktivaceDokoncena) {
-      Log("1.5s ubehlo! Oteviram.");
-      aktivujAnalogServo(ted);
+      if (!pracovniMod) {
+        Log("1.5s ubehlo! Oteviram.");
+        aktivujAnalogServo(ted);
+      }
     }
   } 
   else {
@@ -168,6 +172,13 @@ void receiveEvent(int howMany) {
     byte c = Wire.read();
     if (c == CMD_OPEN_LOCK) cmdOpenLock = true;
     else if (c == 0x99 || c == 0x98) i2c_req = c;
+    else if (c == '3') {
+      pracovniMod = true;
+      Log("Pracovni mod");
+    } else if (c == '0') {
+      pracovniMod = false;
+      Log("Herni mod");
+    }
   }
 }
 

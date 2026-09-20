@@ -351,7 +351,7 @@
                 <h2>Systémová Diagnostika</h2>
                 <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
                     <label style="font-size: 0.8rem; color: var(--text-muted);">IP ESP32:</label>
-                    <input type="text" id="ipAddress" value="192.168.1.100" style="background: #111; border: 1px solid #333; color: #fff; padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">
+                    <input type="text" id="ipAddress" value="192.168.0.100" style="background: #111; border: 1px solid #333; color: #fff; padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">
                 </div>
 
                 <h3 style="font-size: 0.85rem; color: var(--text-muted); margin: 0 0 0.5rem 0; text-transform: uppercase;">Stav Komponent</h3>
@@ -437,15 +437,57 @@
         ipInput.value = savedIp;
 
         ipInput.addEventListener('change', () => {
-            localStorage.setItem('esp_master_ip', ipInput.value.trim());
+            const cleanIp = ipInput.value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            ipInput.value = cleanIp || DEFAULT_IP;
+            localStorage.setItem('esp_master_ip', ipInput.value);
+            scheduleNextPoll(100);
         });
 
         function getBaseUrl() {
             let ip = (ipInput.value.trim() || DEFAULT_IP);
-            if (!ip.startsWith('http')) {
+            if (!ip.startsWith('http://') && !ip.startsWith('https://')) {
                 ip = 'http://' + ip;
             }
             return ip;
+        }
+
+        // --- ROBUSTNÍ SÍŤOVÝ SPRÁVCE (Garantuje max. 1 aktivní požadavek na ENC28J60) ---
+        let isNetworkBusy = false;
+        let pollTimer = null;
+        let failedCount = 0;
+        const MAX_FAILS_BEFORE_OFFLINE = 3;
+        const NORMAL_POLL_INTERVAL = 1200; // ms
+        const RETRY_POLL_INTERVAL = 1800;  // ms
+
+        function setConnectionState(state, modeText = '') {
+            if (state === 'connected') {
+                isConnected = true;
+                statusText.textContent = modeText || (serialPort ? 'Připojeno (USB)' : 'Připojeno (LAN)');
+                statusBadge.className = 'status-indicator connected';
+            } else if (state === 'connecting') {
+                statusText.textContent = 'Připojování...';
+                statusBadge.className = 'status-indicator';
+                statusBadge.style.color = 'var(--accent-orange)';
+                statusBadge.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+                statusBadge.style.backgroundColor = 'rgba(245, 158, 11, 0.1)';
+            } else {
+                isConnected = false;
+                statusText.textContent = 'Odpojeno';
+                statusBadge.className = 'status-indicator';
+                statusBadge.style.color = '';
+                statusBadge.style.borderColor = '';
+                statusBadge.style.backgroundColor = '';
+            }
+        }
+
+        function scheduleNextPoll(delayMs = NORMAL_POLL_INTERVAL) {
+            if (pollTimer) {
+                clearTimeout(pollTimer);
+                pollTimer = null;
+            }
+            if (!serialPort) {
+                pollTimer = setTimeout(fetchState, delayMs);
+            }
         }
 
         function updateHealthDot(id, isOk) {
@@ -457,11 +499,7 @@
         }
 
         function handleTelemetryData(data) {
-            if (!isConnected) {
-                isConnected = true;
-                statusText.textContent = serialPort ? 'Připojeno (USB)' : 'Připojeno (IP)';
-                statusBadge.classList.add('connected');
-            }
+            setConnectionState('connected', serialPort ? 'Připojeno (USB)' : 'Připojeno (LAN)');
 
             if (devMode && data.online) {
                 // Aktualizace panelu "Stav Komponent" na základě tvrdých True/False z I2C sběrnice
@@ -513,6 +551,11 @@
                 document.getElementById('btnConnectUsb').style.color = 'var(--status-green)';
                 document.getElementById('btnConnectUsb').style.borderColor = 'var(--status-green)';
                 
+                if (pollTimer) {
+                    clearTimeout(pollTimer);
+                    pollTimer = null;
+                }
+
                 readSerialLoop();
                 sendCommand("GET_STATE"); // Okamžitá žádost o data po připojení
             } catch (err) {
@@ -538,7 +581,6 @@
                                     handleTelemetryData(JSON.parse(line.substring(10)));
                                 } catch(e) {}
                             } else if (devMode && currentDiagMode === 'logs' && line.length > 0 && !line.startsWith("{")) {
-                                // Vypisujeme všechna klasická serial hlášení od ESP32 do okna logů
                                 const time = new Date().toLocaleTimeString('cs-CZ');
                                 const logDiv = document.createElement('div');
                                 logDiv.innerHTML = `<span style="color:#f59e0b">[ESP]</span> <span style="color:#888">[${time}]</span> ${line}`;
@@ -551,12 +593,11 @@
             } catch (e) {
                 console.error("USB odpojeno", e);
                 serialPort = null;
-                isConnected = false;
-                statusText.textContent = 'Odpojeno';
-                statusBadge.classList.remove('connected');
+                setConnectionState('disconnected');
                 document.getElementById('btnConnectUsb').textContent = 'Připojit přes USB (Web Serial)';
                 document.getElementById('btnConnectUsb').style.color = '';
                 document.getElementById('btnConnectUsb').style.borderColor = '';
+                scheduleNextPoll(500);
             }
         }
 
@@ -584,36 +625,54 @@
         }
 
         async function fetchState() {
-            if (serialPort) return; // Pokud jedeme přes USB, ignorujeme HTTP (síťové) dotazy
+            if (serialPort) return;
+            if (isNetworkBusy) {
+                scheduleNextPoll(300);
+                return;
+            }
 
             const baseUrl = getBaseUrl();
-            if (!baseUrl) return;
+            if (!baseUrl) {
+                scheduleNextPoll(RETRY_POLL_INTERVAL);
+                return;
+            }
+
+            isNetworkBusy = true;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
 
             try {
                 const response = await fetch(`${baseUrl}/api/state`, {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' },
-                    signal: AbortSignal.timeout(1500) // Timeout 1.5s
+                    cache: 'no-store',
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
 
                 if (response.ok) {
                     const data = await response.json();
+                    failedCount = 0;
                     handleTelemetryData(data);
+                    scheduleNextPoll(NORMAL_POLL_INTERVAL);
                 } else {
-                    throw new Error('Chyba serveru');
+                    throw new Error(`HTTP ${response.status}`);
                 }
             } catch (error) {
-                if (isConnected || statusText.textContent !== 'Odpojeno') {
-                    isConnected = false;
-                    statusText.textContent = 'Odpojeno';
-                    statusBadge.classList.remove('connected');
+                failedCount++;
+                if (failedCount >= MAX_FAILS_BEFORE_OFFLINE) {
+                    setConnectionState('disconnected');
+                } else if (isConnected) {
+                    setConnectionState('connecting');
                 }
+                scheduleNextPoll(RETRY_POLL_INTERVAL);
+            } finally {
+                isNetworkBusy = false;
             }
         }
 
-        // Automatický start dotazování po načtení stránky
-        fetchState();
-        setInterval(fetchState, 1500); // 1500ms místo 500ms kvůli limitaci ENC28J60 socketů (zamezí odpojování a zahlcení)
+        // Spuštění po načtení stránky
+        scheduleNextPoll(100);
 
         function toggleDevMode() {
             if (!devMode) {
@@ -641,31 +700,64 @@
 
         async function sendCommand(cmd) {
             if (serialPort && serialWriter) {
-                const encoder = new TextEncoder();
-                await serialWriter.write(encoder.encode(cmd + '\n'));
-                console.log('USB Odesláno:', cmd);
+                try {
+                    const encoder = new TextEncoder();
+                    await serialWriter.write(encoder.encode(cmd + '\n'));
+                    console.log('USB Odesláno:', cmd);
+                } catch (err) {
+                    console.error('Chyba při odesílání přes USB:', err);
+                }
                 return;
             }
 
             const baseUrl = getBaseUrl();
             if (!baseUrl) {
-                alert('Chybí IP adresa!');
+                console.warn('Chybí IP adresa!');
                 return;
             }
+
+            // Zastavíme plánovaný polling po dobu odesílání příkazu
+            if (pollTimer) {
+                clearTimeout(pollTimer);
+                pollTimer = null;
+            }
+
+            // Pokud právě dobíhá GET požadavek, krátce počkáme (max 200ms)
+            let waitAttempts = 0;
+            while (isNetworkBusy && waitAttempts < 4) {
+                await new Promise(r => setTimeout(r, 50));
+                waitAttempts++;
+            }
+
+            isNetworkBusy = true;
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+
             try {
                 const response = await fetch(`${baseUrl}/api/command`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain' },
-                    body: cmd
+                    body: cmd,
+                    cache: 'no-store',
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
                 
-                if (!response.ok) {
-                    throw new Error(`HTTP chyba! status: ${response.status}`);
+                if (response.ok) {
+                    failedCount = 0;
+                    setConnectionState('connected', 'Připojeno (LAN)');
+                    console.log('Příkaz úspěšně doručen:', cmd);
+                    // Okamžitá aktualizace stavu pro okamžitou odezvu v UI
+                    scheduleNextPoll(100);
+                } else {
+                    console.warn(`Příkaz vrátil status: ${response.status}`);
+                    scheduleNextPoll(500);
                 }
-                console.log('Odesláno:', cmd);
             } catch (error) {
-                console.error('Chyba při odesílání:', error);
-                alert('Příkaz se nepodařilo odeslat. Zkontrolujte připojení.');
+                console.error('Chyba při odesílání příkazu:', error);
+                scheduleNextPoll(1000);
+            } finally {
+                isNetworkBusy = false;
             }
         }
     </script>

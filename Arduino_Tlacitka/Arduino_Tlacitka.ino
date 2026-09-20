@@ -36,6 +36,7 @@ unsigned long casZmenyTlacitka[5] = {0, 0, 0, 0, 0};
 unsigned long posledniAktivitaHesla = 0;  
 unsigned long startServoZamek = 0;
 bool zamekVakci = false;
+bool schrankaOtevrena = false; // Po otevření schránky se modul zablokuje až do pracovního módu / resetu
 
 Servo servoZamek;
 
@@ -80,16 +81,26 @@ void loop() {
   if (cmdOpenLock && !zamekVakci) { 
     Log("I2C: Prikaz k otevreni!");
     otevriZamek(ted); 
+    i2cStatus = 5;
+    casZmenyI2C = ted;
     cmdOpenLock = false; 
   }
 
   handleButtons(ted);
 
-  // Fyzický návrat serva po 3 sekundách
-  if (zamekVakci && (ted - startServoZamek > 3000)) { 
+  // Fyzický návrat serva do výchozí pozice po 2 sekundách od otevření
+  if (zamekVakci && (ted - startServoZamek > 2000)) { 
     servoZamek.write(0); 
     zamekVakci = false; 
-    Log("Zamek se mechanicky zavira");
+    Log("Zamek se mechanicky vraci (zavreno)");
+  }
+
+  // Případně web/Master si to může resetovat.
+  if (i2cStatus == 99) { // 99 si určíme jako reset z Mastera
+    servoZamek.write(0);
+    zamekVakci = false;
+    schrankaOtevrena = false;
+    i2cStatus = 0;
   }
 
   // Aktualizace telemetrie pro ESP32
@@ -143,6 +154,8 @@ void handleButtons(unsigned long ted) {
             Log(">>> HESLO SPRAVNE <<<");
             otevriZamek(ted);
             pocetChybek = 0;
+            i2cStatus = 5; 
+            casZmenyI2C = ted;
           } else {
             Log(">>> HESLO SPATNE <<<");
             pocetChybek++;
@@ -167,8 +180,24 @@ void handleButtons(unsigned long ted) {
 void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read();
-    if (c == CMD_OPEN_LOCK) cmdOpenLock = true;
-    else if (c == 0x99 || c == 0x98) i2c_req = c;
+    if (c == CMD_OPEN_LOCK) {
+      cmdOpenLock = true;
+    } else if (c == 0x99 || c == 0x98) {
+      i2c_req = c;
+    } else if (c == '3') {
+      // Pouze pracovní mód ('3') odblokuje schránku pro další hru
+      schrankaOtevrena = false;
+      pocetChybek = 0;
+      pocetZadanych = 0;
+      for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
+      Log("Pracovni mod - schranka reset");
+    } else if (c == '0' || c == 'R' || c == 99) {
+      // Běžný návrat/reset (např. z laser alarmu)
+      pocetChybek = 0;
+      pocetZadanych = 0;
+      for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
+      Log("Reset / Herni mod");
+    }
   }
 }
 
@@ -186,6 +215,7 @@ void requestEvent() {
 
 void otevriZamek(unsigned long ted) {
   // i2cStatus necháváme 0, aby se neodesílala změna stavu na zelenou na světlech
+  schrankaOtevrena = true;
   servoZamek.write(150); 
   startServoZamek = ted; 
   zamekVakci = true;

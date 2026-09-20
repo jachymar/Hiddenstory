@@ -78,6 +78,8 @@ uint8_t readI2CBasic(int adresa) {
   return 255; // 255 znamená, že zařízení neodpovídá
 }
 
+uint8_t currentSysMode = 0;
+
 // Callback pro prijem zprav pres ESP-NOW
 void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
   if (len == sizeof(struct_msg_from_master)) {
@@ -99,8 +101,19 @@ void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, in
     struct_msg_from_master msg;
     memcpy(&msg, incomingData, sizeof(msg));
     Serial.print("Prijat ESP-NOW prikaz '"); Serial.print(msg.command);
-    Serial.print("' pro I2C "); Serial.println(msg.target_i2c);
+    Serial.print("' pro I2C "); Serial.print(msg.target_i2c);
+    Serial.print(" | sys_mode: "); Serial.println(msg.sys_mode);
     
+    // Změna módu
+    if (msg.sys_mode != currentSysMode) {
+      currentSysMode = msg.sys_mode;
+      if (currentSysMode == 3) {
+        posliPrikazI2C(ADDR_AUDIO3, '3');
+      } else if (currentSysMode == 0) {
+        posliPrikazI2C(ADDR_AUDIO3, '0');
+      }
+    }
+
     // Vyžádání diagnostiky
     if (msg.command == 'R') {
       DiagTukani tukani;
@@ -246,8 +259,8 @@ void loop() {
 
     static bool solvedReported = false;
 
-    // Zpracování stavů Tukani a předávání do Audio3
-    if (tukaniBasic != 255) {
+    // Zpracování stavů Tukani a předávání do Audio3 (pouze v herním režimu, ne v pracovním)
+    if (currentSysMode != 3 && tukaniBasic != 255) {
       if (tukaniBasic == 1 && !beepReported) { 
         beepReported = true;
         Serial.println("Mistnost 3: Tukani zada o pipnuti (Povel E)");

@@ -1,10 +1,14 @@
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <HTTPClient.h>
 
 // --- WLED NASTAVENÍ ---
 const char* ssid = "Indy-Wifi";
 const char* password = "wled1234";
 const char* wled_ips[] = {"192.168.1.2", "192.168.1.3", "192.168.1.4"};
+const int WLED_UDP_PORT = 21324; // Nativní UDP JSON port WLED
+
+WiFiUDP udp;
 
 IPAddress local_IP(192,168,1,50); // Nastavime ESP na statickou .50 at je hned pripojene
 IPAddress gateway(192,168,1,1);
@@ -20,32 +24,31 @@ const int jasVysoky1 = 172;
 const int jasNizky = 10, jasDruhyStandard = 5;    
 const int jasVysoky3 = 15;
 
-int currentMode = 3; // Režim po zapnutí: 0=Herní, 1=Vypnuto, 3=Pracovní
+int currentMode = 0; // Režim po zapnutí: 0=Herní, 1=Vypnuto, 3=Pracovní
 int currentColorBtn = 0; // Tlačítka: 1=Červená, 2=Zelená, 0=Nic
 int currentCrystalsState = 0; // Krystaly: 2=Modrá, 0=Nic
-int currentSvetlaSeq = 0; // 0 = klid/vypnuto, 1 = běží kaskáda na Arduinu (zeslabit WLED1)
+int currentSvetlaSeq = 0; // 0 = klid/vypnuto, 1 = běží kaskáda na Arduinu (zeslabit WLED)
 
 // Uchování stavu připojení pro 3 WLED zařízení
 bool wledStatus[3] = {false, false, false};
 unsigned long lastPingTime = 0;
 
 void pingWLEDs() {
-  HTTPClient http;
-  http.setTimeout(150); // Zkraceno, aby ping neblokoval WiFi task
-  http.setReuse(true); // Udrzet otevrene TCP spojeni zrychli celou smycku
   bool changed = false;
   
   for(int i = 0; i < 3; i++) {
+    HTTPClient http;
+    http.setTimeout(150); // Zkraceno, aby ping neblokoval WiFi task
     http.begin("http://" + String(wled_ips[i]) + "/json/state");
     int httpCode = http.GET();
-    bool isOnline = (httpCode > 0); // Nekontrolujeme striktne 200, jakakoli odpoved znamena, ze modul zije
+    bool isOnline = (httpCode > 0); 
+    http.end();
     
     if (wledStatus[i] != isOnline) {
       wledStatus[i] = isOnline;
       changed = true;
     }
   }
-  http.end();
 
   // Odeslat stav do Master jednotky
   String statusMsg = "WLED:";
@@ -57,15 +60,11 @@ void pingWLEDs() {
   Serial2.println(statusMsg);
 }
 
-void posliPrikaz(const char* ip, String json) {
-  HTTPClient http;
-  http.setTimeout(100); // 100ms staci pro odeslani asynchronniho paketu do lokalni site
-  http.begin("http://" + String(ip) + "/json/state");
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("Connection", "close");
-  http.POST(json);
-  http.end();
-  delay(1); // Uvolneni tasku (Watchdog)
+// Bleskové odeslání JSON příkazu přes UDP (odezva < 1 ms bez blokování TCP spojením)
+void posliPrikaz(const char* ip, const String& json) {
+  udp.beginPacket(ip, WLED_UDP_PORT);
+  udp.write((const uint8_t*)json.c_str(), json.length());
+  udp.endPacket();
 }
 
 String vytvorJson(int r, int g, int b, int jas, int tt, int fx = 102) {
@@ -86,8 +85,8 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
     // Modro-oranžový mix při plném jasu (Krystaly v Lebce)
     r1 = (baseR * 40) / 100; g1 = (baseG * 40) / 100; b1 = (baseB * 40 + 255 * 60) / 100;
     jas1 = (currentSvetlaSeq == 1) ? jasNizky : 255;
-    jas2 = jasDruhyStandard; 
-    jas3 = 255;
+    jas2 = (currentSvetlaSeq == 1) ? 0 : jasDruhyStandard; 
+    jas3 = (currentSvetlaSeq == 1) ? jasNizky : 255;
     if (vsem) { tt13 = 0; tt2 = 0; } else if (zmenaZ8) { tt13 = 20; tt2 = 2; }
     
     posliPrikaz(wled_ips[0], vytvorJson(r1, g1, b1, jas1, tt13));
@@ -105,8 +104,8 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
       b1 = ((2 * baseB) + tb) / 3;
       
       jas1 = (currentSvetlaSeq == 1) ? jasNizky : 255; 
-      jas2 = (s8 == 1) ? 3 : jasDruhyStandard;
-      jas3 = 255;
+      jas2 = (s8 == 1 || currentSvetlaSeq == 1) ? 0 : jasDruhyStandard;
+      jas3 = (currentSvetlaSeq == 1) ? jasNizky : 255;
       
       tt13 = 6; // Fáze 1: Náběh
       tt2 = 6;
@@ -122,9 +121,11 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
 
       tt13 = 15; // Fáze 2: Pokles
       int klesajiciJas1 = (s8 == 1 || currentSvetlaSeq == 1) ? jasNizky : jasVysoky1;
-      int klesajiciJas3 = (s8 == 1) ? jasNizky : jasVysoky3;
+      int klesajiciJas2 = (s8 == 1 || currentSvetlaSeq == 1) ? 0 : jasDruhyStandard;
+      int klesajiciJas3 = (s8 == 1 || currentSvetlaSeq == 1) ? jasNizky : jasVysoky3;
 
       posliPrikaz(wled_ips[0], vytvorJson(r1, g1, b1, klesajiciJas1, tt13));
+      posliPrikaz(wled_ips[1], vytvorJson(druhyR, druhyG, druhyB, klesajiciJas2, tt2));
       posliPrikaz(wled_ips[2], vytvorJson(r1, g1, b1, klesajiciJas3, tt13));
 
     } else {
@@ -132,8 +133,8 @@ void aktualizujSystem(int s3, int s8, bool zmenaZ8, bool vsem = false) {
       r1 = baseR; g1 = baseG; b1 = baseB;
       
       jas1 = (s8 == 1 || currentSvetlaSeq == 1) ? jasNizky : jasVysoky1;
-      jas2 = (s8 == 1) ? 3 : jasDruhyStandard;
-      jas3 = (s8 == 1) ? jasNizky : jasVysoky3;
+      jas2 = (s8 == 1 || currentSvetlaSeq == 1) ? 0 : jasDruhyStandard;
+      jas3 = (s8 == 1 || currentSvetlaSeq == 1) ? jasNizky : jasVysoky3;
 
       if (currentColorBtn == 1 || currentColorBtn == 2) {
         tt13 = 15; 
@@ -198,6 +199,8 @@ void setup() {
   }
   
   if (WiFi.status() == WL_CONNECTED) {
+    WiFi.setSleep(false); // Vypne úsporný režim Wi-Fi rádia pro okamžitou odezvu bez latence
+    udp.begin(WLED_UDP_PORT);
     Serial.println("\nPripojeno k WiFi!");
     Serial.print("IP Adresa: ");
     Serial.println(WiFi.localIP());
@@ -254,8 +257,8 @@ void loop() {
     }
   }
 
-  // Pravidelný ping na WLED zařízení každých 5 sekund
-  if (millis() - lastPingTime > 5000) {
+  // Pravidelný ping na WLED zařízení každých 10 sekund pouze v herním/pracovním klidu
+  if (currentMode != 1 && (millis() - lastPingTime > 10000)) {
     lastPingTime = millis();
     pingWLEDs();
   }

@@ -95,6 +95,7 @@ void setup() {
 
   Wire.begin(I2C_ADRESA_ARDUINA);
   Wire.onReceive(prijemDatI2C); 
+  Wire.onRequest(odeslaniDatI2C);
   
   Serial.println(F("System pripraven. Hraji /0001.mp3."));
 }
@@ -392,4 +393,11 @@ void prijemDatI2C(int pocetBytu) {
       lastMasterCommand = CMD_PLAY_VICTORY;
     }
   }
+}
+
+// --- FUNKCE PRO ODPOVĚĎ NA I2C POŽADAVEK MASTERA ---
+void odeslaniDatI2C() {
+  // Vrátí 1 pokud jsou dveře otevřené (PIN HIGH), 0 pokud jsou zavřené (PIN LOW se zemí)
+  uint8_t stavDveri = (digitalRead(PIN_DVERE) == HIGH) ? 1 : 0;
+  Wire.write(stavDveri);
 }

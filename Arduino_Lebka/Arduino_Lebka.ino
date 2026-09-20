@@ -50,6 +50,7 @@ const int dobaPotvrzeniCile = 200;
 bool krystalAktivni[3] = {false, false, false};
 unsigned long casAktivaceKrystalu[3] = {0, 0, 0};
 unsigned long casDeaktivaceKrystalu[3] = {0, 0, 0};
+bool pracovniMod = false;
 
 enum HerniStav {
   CEKANI_NA_KRYSTALY,
@@ -76,8 +77,19 @@ void handleBridgeCommand(char cmd) {
   if (cmd == CMD_OPEN_LOCK) {
     cmdOpenLock = true;
     bridgeSerial.println("OK");
+  } else if (cmd == '3') {
+    pracovniMod = true;
+    stavHry = CEKANI_NA_KRYSTALY;
+    analogWrite(pinLED_PWM, 0);
+    Log("Pracovni mod");
+    bridgeSerial.println("OK");
+  } else if (cmd == '0') {
+    pracovniMod = false;
+    Log("Herni mod");
+    bridgeSerial.println("OK");
   } else if (cmd == 'S') {
-    bridgeSerial.print((int)myTelemetry.crystals_mask);
+    uint8_t st = (!pracovniMod && myTelemetry.crystals_mask == 7) ? 2 : 0;
+    bridgeSerial.print((int)st);
     bridgeSerial.print('\n');
   } else if (cmd == 'D') {
     bridgeSerial.print((int)stavHry);
@@ -93,6 +105,7 @@ void handleBridgeCommand(char cmd) {
     bridgeSerial.print((int)myTelemetry.lock_open);
     bridgeSerial.print('\n');
   } else if (cmd == 'L') {
+    bridgeSerial.print("LOG:");
     bridgeSerial.println(lastLog);
   }
 }
@@ -117,7 +130,7 @@ void loop() {
 
   if (bridgeSerial.available()) {
     char c = bridgeSerial.read();
-    if (c == 'A' || c == 'S' || c == 'D' || c == 'L') {
+    if (c == 'A' || c == 'S' || c == 'D' || c == 'L' || c == '3' || c == '0') {
       handleBridgeCommand(c);
     }
   }
@@ -196,45 +209,49 @@ void loop() {
     }
   }
 
-  switch (stavHry) {
-    case CEKANI_NA_KRYSTALY:
-      if (vsechnyKrystalyOk && krystalAktivni[0] && krystalAktivni[1] && krystalAktivni[2]) {
-        Log("Vsechny krystaly na miste!");
-        stavHry = ODPOCET;
-        casZmenyStavu = ted;
-      }
-      break;
-
-    case ODPOCET:
-      if (vsechnyKrystalyOk == false) {
-        if (casZtratyKrystalu == 0) casZtratyKrystalu = ted;
-        if (ted - casZtratyKrystalu > 300) {
-          Log("Krystal ztracen behem odpoctu");
-          stavHry = CEKANI_NA_KRYSTALY;
-          casZtratyKrystalu = 0;
-        }
-      } else {
-        casZtratyKrystalu = 0;
-        if (ted - casZmenyStavu >= casDoOtevreniKrystaly) {
-          Log("Odpocet hotov. Oteviram!");
-          stavHry = ODEMYKANI;
+  if (!pracovniMod) {
+    switch (stavHry) {
+      case CEKANI_NA_KRYSTALY:
+        if (vsechnyKrystalyOk && krystalAktivni[0] && krystalAktivni[1] && krystalAktivni[2]) {
+          Log("Vsechny krystaly na miste!");
+          stavHry = ODPOCET;
           casZmenyStavu = ted;
         }
-      }
-      break;
+        break;
 
-    case ODEMYKANI:
-      if (ted - casZmenyStavu >= dobaCekaniAkceKrystaly) {
-        stavHry = HOTOVO_CEKANI_NA_VYNDANI;
-      }
-      break;
+      case ODPOCET:
+        if (vsechnyKrystalyOk == false) {
+          if (casZtratyKrystalu == 0) casZtratyKrystalu = ted;
+          if (ted - casZtratyKrystalu > 300) {
+            Log("Krystal ztracen behem odpoctu");
+            stavHry = CEKANI_NA_KRYSTALY;
+            casZtratyKrystalu = 0;
+          }
+        } else {
+          casZtratyKrystalu = 0;
+          if (ted - casZmenyStavu >= casDoOtevreniKrystaly) {
+            Log("Odpocet hotov. Oteviram!");
+            stavHry = ODEMYKANI;
+            casZmenyStavu = ted;
+          }
+        }
+        break;
 
-    case HOTOVO_CEKANI_NA_VYNDANI:
-      if (vsechnyKrystalyOk == false) {
-        Log("Krystaly odebrany. Reset.");
-        stavHry = CEKANI_NA_KRYSTALY;
-      }
-      break;
+      case ODEMYKANI:
+        if (ted - casZmenyStavu >= dobaCekaniAkceKrystaly) {
+          stavHry = HOTOVO_CEKANI_NA_VYNDANI;
+        }
+        break;
+
+      case HOTOVO_CEKANI_NA_VYNDANI:
+        if (vsechnyKrystalyOk == false) {
+          Log("Krystaly odebrany. Reset.");
+          stavHry = CEKANI_NA_KRYSTALY;
+        }
+        break;
+    }
+  } else {
+    stavHry = CEKANI_NA_KRYSTALY;
   }
 
   if (i2cOpenActive || (stavHry == ODEMYKANI)) {
@@ -246,7 +263,7 @@ void loop() {
   static int jas = 0;
   static unsigned long lastF = 0;
 
-  bool efektSvetla = (stavHry != CEKANI_NA_KRYSTALY);
+  bool efektSvetla = (!pracovniMod && stavHry != CEKANI_NA_KRYSTALY);
 
   if (ted - lastF >= rychlostFading) {
     if (efektSvetla && jas < 255) jas++;

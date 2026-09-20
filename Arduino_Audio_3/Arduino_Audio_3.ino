@@ -11,6 +11,7 @@ volatile bool cmdStop = false;
 volatile bool cmdAlarm = false; 
 volatile bool cmdBeep = false;  
 volatile bool cmdSolved = false; // Příkaz pro vyřešené puzzle
+bool pracovniMod = false;
 
 char lastLog[30] = "Start";
 
@@ -44,10 +45,22 @@ void receiveEvent(int howMany) {
   while (Wire.available()) {
     byte c = Wire.read();
     if (c == 0x99 || c == 0x98) i2c_req = c;
-    else if (c == 'S') cmdStop = true;
-    else if (c == 'A') cmdAlarm = true; 
-    else if (c == 'E') cmdBeep = true;  
-    else if (c == 'D') cmdSolved = true; 
+    else if (c == 'S' || c == '3') {
+      cmdStop = true;
+      pracovniMod = true;
+    }
+    else if (c == '0') {
+      pracovniMod = false;
+    }
+    else if (c == 'A') {
+      if (!pracovniMod) cmdAlarm = true;
+    }
+    else if (c == 'E') {
+      if (!pracovniMod) cmdBeep = true;
+    }
+    else if (c == 'D') {
+      if (!pracovniMod) cmdSolved = true;
+    }
   }
 }
 
@@ -204,7 +217,7 @@ void loop() {
   // --- 2. HINT LOGIKA ---
   bool inSolvedCooldown = (solvedTime > 0 && (now - solvedTime < SOLVED_COOLDOWN_MS));
 
-  if (doorOpen && !inSolvedCooldown) {
+  if (doorOpen && !inSolvedCooldown && !pracovniMod) {
     // 1) Pravidlo pro 8s neaktivitu: od posledního ťuknutí / otevření uběhlo 8 s
     //    Přehraje se pouze 1x (dokud hráč znovu neťukne)
     if (!hint8sPlayed && lastTapTime > 0 && (now - lastTapTime >= 8000)) {

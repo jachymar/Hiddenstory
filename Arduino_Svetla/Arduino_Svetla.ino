@@ -44,8 +44,15 @@ void Log(const char* txt) {
 /* --- STAVOVÉ PROMĚNNÉ SYSTÉMU --- */
 bool cyklusBezi = false;
 bool pripravenoKActivaci = false;
+bool pracovniMod = false;
 unsigned long casVstupuDoOkna = 0; 
 unsigned long casStartuPauzy = 0;  // Hlídá pauzu mezi dozhasnutím a startem další LED
+
+/* --- NOUZOVÝ REŽIM (BEZ SERVA) - OPAKOVÁNÍ SEKVENCE --- */
+bool opakovatSekvenci = false;
+bool schrankaOtevrena = false;
+unsigned long casPoslednihoSpusteni = 0;
+const unsigned long INTERVAL_OPAKOVANI = 40000; // Opakování každých 40 sekund
 
 unsigned long casAktivaceMagnetem = 0;
 unsigned long casStartuSekvence = 0;
@@ -87,7 +94,7 @@ void setup() {
   
   pinMode(pinServo, OUTPUT);
   digitalWrite(pinServo, LOW);
-  cilovyUhelServa = 0;
+  cilovyUhelServa = 5;
   
   for (int i = 0; i < pocetSvetel; i++) {
     pinMode(poradpinu[i], OUTPUT);
@@ -110,18 +117,60 @@ void setup() {
   }
   klidovaHodnota = suma / 30;
   
-  // Zabezpečení, aby výchozí klidová hodnota nebyla mimo povolené meze
-  if (klidovaHodnota < 520) klidovaHodnota = 520;
-  if (klidovaHodnota > 532) klidovaHodnota = 532;
+  // Zabezpečení proti extrémním chybám senzoru (např. odpojený pin 0 nebo 1023)
+  if (klidovaHodnota < 200 || klidovaHodnota > 850) {
+    klidovaHodnota = 512;
+  }
   
   // Vložení první hodnoty do historie kalibrace
-  historieHodnot[0] = klidovaHodnota;
+  for (int i = 0; i < velikostBufferu; i++) {
+    historieHodnot[i] = klidovaHodnota;
+  }
   pocetVzorku = 1;
   indexHistorie = 1;
+  pripravenoKActivaci = true;
+  opakovatSekvenci = false;
+  schrankaOtevrena = false;
+  casVstupuDoOkna = millis();
   
   char m[30];
   sprintf(m, "Klid: %d", klidovaHodnota);
   Log(m);
+}
+
+void spustSekvenci(unsigned long ted) {
+  cyklusBezi = true;
+  vsechnaRozsvicena = false;
+  aktualniRozsvicena = 0;
+  aktualniVypnuta = 0;
+  casZacatkuSviceni = 0;
+  casStartuSekvence = 0;
+  casStartuPauzy = 0;
+  casAktivaceMagnetem = ted;
+  casPoslednihoSpusteni = ted;
+  for (int i = 0; i < pocetSvetel; i++) {
+    stavSvetla[i] = 0;
+    aktualniJas[i] = 0;
+    digitalWrite(poradpinu[i], LOW);
+    nastavUnikatniParametry(i);
+  }
+}
+
+void vypniVsechnaSvetla() {
+  cyklusBezi = false;
+  i2cStatus = 0;
+  vsechnaRozsvicena = false;
+  aktualniRozsvicena = 0;
+  aktualniVypnuta = 0;
+  casZacatkuSviceni = 0;
+  casStartuSekvence = 0;
+  casStartuPauzy = 0;
+  for (int i = 0; i < pocetSvetel; i++) {
+    stavSvetla[i] = 0;
+    aktualniJas[i] = 0;
+    digitalWrite(poradpinu[i], LOW);
+    nastavUnikatniParametry(i);
+  }
 }
 
 void loop() {
@@ -137,8 +186,8 @@ void loop() {
     casPoslednihoVzorku = ted;
     int aktualniCteni = analogRead(pinSenzoru);
     
-    // Hodnota se započítá do průměru POUZE pokud je v bezpečném rozmezí (např. bez kuličky)
-    if (aktualniCteni >= 520 && aktualniCteni <= 532) {
+    // Hodnota se započítá do průměru POUZE pokud je v klidovém stavu (bez magnetu)
+    if (abs(aktualniCteni - klidovaHodnota) <= (deltaThreshold / 2)) {
       historieHodnot[indexHistorie] = aktualniCteni;
       indexHistorie = (indexHistorie + 1) % velikostBufferu; 
       if (pocetVzorku < velikostBufferu) pocetVzorku++;
@@ -157,12 +206,12 @@ void loop() {
   int odchylka = abs(h - klidovaHodnota);
   
   bool senzorVKlidu = (odchylka <= (deltaThreshold / 2));
-  bool senzorAktivni = (odchylka > deltaThreshold);
+  bool senzorAktivni = (odchylka >= deltaThreshold);
 
   // Ochranná lhůta před dalším spuštěním (0.8s musí být v absolutním klidu)
   if (senzorVKlidu && !cyklusBezi) {
     if (casVstupuDoOkna == 0) casVstupuDoOkna = ted;
-    if (ted - casVstupuDoOkna > ochrannaLhuta) pripravenoKActivaci = true;
+    if (ted - casVstupuDoOkna >= ochrannaLhuta) pripravenoKActivaci = true;
     casZacatkuAktivitySenzoru = 0;
     senzorTrvaleAktivni = false;
   } else if (!senzorVKlidu) {
@@ -172,7 +221,7 @@ void loop() {
     if (senzorAktivni) {
       if (casZacatkuAktivitySenzoru == 0) {
         casZacatkuAktivitySenzoru = ted;
-      } else if (ted - casZacatkuAktivitySenzoru > DOBA_POTVRZENI_MAGNETU) {
+      } else if (ted - casZacatkuAktivitySenzoru >= DOBA_POTVRZENI_MAGNETU) {
         senzorTrvaleAktivni = true;
       }
     } else {
@@ -181,19 +230,20 @@ void loop() {
     }
   }
 
-  // SPUŠTĚNÍ SHOW (Kulička je přiložena a potvrzena filtrací)
-  if (senzorTrvaleAktivni && pripravenoKActivaci && !cyklusBezi) {
-    Log("SHOW START! Kulicka vlozena");
-    cyklusBezi = true;
+  // SPUŠTĚNÍ SHOW (Kulička je přiložena a potvrzena filtrací) - v pracovním módu se nespouští
+  if (!pracovniMod && senzorTrvaleAktivni && pripravenoKActivaci && !cyklusBezi && !schrankaOtevrena) {
+    Log("SHOW START! Magnet detekovan");
+    opakovatSekvenci = true;
     pripravenoKActivaci = false;
-    
-    vsechnaRozsvicena = false;
-    aktualniRozsvicena = 0;
-    aktualniVypnuta = 0;
-    casZacatkuSviceni = 0;
-    casStartuSekvence = 0;
-    casStartuPauzy = 0;
-    casAktivaceMagnetem = ted; 
+    spustSekvenci(ted);
+  }
+
+  // --- OPAKOVÁNÍ SEKVENCE KAŽDÝCH 40s (DOKUD NENÍ SCHRÁNKA OTEVŘENA) ---
+  if (!pracovniMod && opakovatSekvenci && !schrankaOtevrena) {
+    if (!cyklusBezi && (ted - casPoslednihoSpusteni >= INTERVAL_OPAKOVANI)) {
+      Log("SHOW REPEAT (40s)");
+      spustSekvenci(ted);
+    }
   }
 
   // --- 5. ANIMACE LED (Kaskáda) ---
@@ -331,10 +381,10 @@ void loop() {
       servoVPohybu = true;
       Log("Servo: 30 deg");
     } else if (ted - casZacatkuChyby > 1000) {
-      cilovyUhelServa = 0;
+      cilovyUhelServa = 5;
       chybovaSekvenceAktivni = false;
       servoVPohybu = false;
-      Log("Servo: 0 deg");
+      Log("Servo: 5 deg");
     }
   }
 
@@ -376,6 +426,30 @@ void receiveEvent(int howMany) {
       i2c_req = c;
     } else if (c == 'E') {
       chybovaSekvenceAktivni = true;
+    } else if (c == 'O' || c == 'B') {
+      // Schránka otevřena tlačítky nebo webem -> okamžitě zastavit světla a zablokovat další spouštění
+      schrankaOtevrena = true;
+      opakovatSekvenci = false;
+      vypniVsechnaSvetla();
+      Log("I2C: Schranka otevrena - STOP");
+    } else if (c == '3') {
+      // POUZE PRACOVNÍ MÓD ('3') odblokuje schránku a uvede modul do pracovního klidu
+      pracovniMod = true;
+      schrankaOtevrena = false;
+      opakovatSekvenci = false;
+      vypniVsechnaSvetla();
+      pripravenoKActivaci = false;
+      Log("I2C: Pracovni mod - reset");
+    } else if (c == 'R' || c == '0' || c == 99) {
+      // Běžný návrat/reset (např. z laser alarmu) - pokud již byla schránka otevřena, zůstává zablokovaná až do pracovního módu!
+      pracovniMod = false;
+      if (!schrankaOtevrena) {
+        opakovatSekvenci = false;
+        vypniVsechnaSvetla();
+        pripravenoKActivaci = true;
+        casVstupuDoOkna = millis();
+        Log("I2C: Reset");
+      }
     }
   }
 }
