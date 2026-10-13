@@ -48,11 +48,8 @@ bool pracovniMod = false;
 unsigned long casVstupuDoOkna = 0; 
 unsigned long casStartuPauzy = 0;  // Hlídá pauzu mezi dozhasnutím a startem další LED
 
-/* --- NOUZOVÝ REŽIM (BEZ SERVA) - OPAKOVÁNÍ SEKVENCE --- */
-bool opakovatSekvenci = false;
+/* --- STAV SCHRÁNKY --- */
 bool schrankaOtevrena = false;
-unsigned long casPoslednihoSpusteni = 0;
-const unsigned long INTERVAL_OPAKOVANI = 40000; // Opakování každých 40 sekund
 
 unsigned long casAktivaceMagnetem = 0;
 unsigned long casStartuSekvence = 0;
@@ -94,7 +91,7 @@ void setup() {
   
   pinMode(pinServo, OUTPUT);
   digitalWrite(pinServo, LOW);
-  cilovyUhelServa = 5;
+  cilovyUhelServa = 0;
   
   for (int i = 0; i < pocetSvetel; i++) {
     pinMode(poradpinu[i], OUTPUT);
@@ -129,7 +126,6 @@ void setup() {
   pocetVzorku = 1;
   indexHistorie = 1;
   pripravenoKActivaci = true;
-  opakovatSekvenci = false;
   schrankaOtevrena = false;
   casVstupuDoOkna = millis();
   
@@ -147,7 +143,6 @@ void spustSekvenci(unsigned long ted) {
   casStartuSekvence = 0;
   casStartuPauzy = 0;
   casAktivaceMagnetem = ted;
-  casPoslednihoSpusteni = ted;
   for (int i = 0; i < pocetSvetel; i++) {
     stavSvetla[i] = 0;
     aktualniJas[i] = 0;
@@ -233,17 +228,8 @@ void loop() {
   // SPUŠTĚNÍ SHOW (Kulička je přiložena a potvrzena filtrací) - v pracovním módu se nespouští
   if (!pracovniMod && senzorTrvaleAktivni && pripravenoKActivaci && !cyklusBezi && !schrankaOtevrena) {
     Log("SHOW START! Magnet detekovan");
-    opakovatSekvenci = true;
     pripravenoKActivaci = false;
     spustSekvenci(ted);
-  }
-
-  // --- OPAKOVÁNÍ SEKVENCE KAŽDÝCH 40s (DOKUD NENÍ SCHRÁNKA OTEVŘENA) ---
-  if (!pracovniMod && opakovatSekvenci && !schrankaOtevrena) {
-    if (!cyklusBezi && (ted - casPoslednihoSpusteni >= INTERVAL_OPAKOVANI)) {
-      Log("SHOW REPEAT (40s)");
-      spustSekvenci(ted);
-    }
   }
 
   // --- 5. ANIMACE LED (Kaskáda) ---
@@ -373,18 +359,23 @@ void loop() {
     }
   }
 
-  // --- 6. LOGIKA SERVA (Chybová sekvence hesel z tlačítek) ---
+  // --- 6. LOGIKA SERVA (Chybová sekvence hesel z tlačítek a pracovní mód) ---
   if (chybovaSekvenceAktivni) {
-    if (!servoVPohybu) {
-      cilovyUhelServa = 30;
-      casZacatkuChyby = ted;
-      servoVPohybu = true;
-      Log("Servo: 30 deg");
-    } else if (ted - casZacatkuChyby > 1000) {
-      cilovyUhelServa = 5;
+    if (schrankaOtevrena && !pracovniMod) {
       chybovaSekvenceAktivni = false;
       servoVPohybu = false;
-      Log("Servo: 5 deg");
+    } else {
+      if (!servoVPohybu) {
+        cilovyUhelServa = 20;
+        casZacatkuChyby = ted;
+        servoVPohybu = true;
+        Log("Servo: 20 deg");
+      } else if (ted - casZacatkuChyby > 1000) {
+        cilovyUhelServa = 0;
+        chybovaSekvenceAktivni = false;
+        servoVPohybu = false;
+        Log("Servo: 0 deg");
+      }
     }
   }
 
@@ -426,25 +417,27 @@ void receiveEvent(int howMany) {
       i2c_req = c;
     } else if (c == 'E') {
       chybovaSekvenceAktivni = true;
+      servoVPohybu = false;
+      casZacatkuChyby = 0;
+      Log("I2C: Prikaz E (Vysypani kulicky servom)");
     } else if (c == 'O' || c == 'B') {
       // Schránka otevřena tlačítky nebo webem -> okamžitě zastavit světla a zablokovat další spouštění
       schrankaOtevrena = true;
-      opakovatSekvenci = false;
       vypniVsechnaSvetla();
       Log("I2C: Schranka otevrena - STOP");
     } else if (c == '3') {
-      // POUZE PRACOVNÍ MÓD ('3') odblokuje schránku a uvede modul do pracovního klidu
+      // POUZE PRACOVNÍ MÓD ('3') odblokuje schránku, uvede modul do pracovního klidu a vysype kuličku
       pracovniMod = true;
       schrankaOtevrena = false;
-      opakovatSekvenci = false;
       vypniVsechnaSvetla();
       pripravenoKActivaci = false;
-      Log("I2C: Pracovni mod - reset");
+      chybovaSekvenceAktivni = true;
+      servoVPohybu = false;
+      Log("I2C: Pracovni mod - reset a servo");
     } else if (c == 'R' || c == '0' || c == 99) {
       // Běžný návrat/reset (např. z laser alarmu) - pokud již byla schránka otevřena, zůstává zablokovaná až do pracovního módu!
       pracovniMod = false;
       if (!schrankaOtevrena) {
-        opakovatSekvenci = false;
         vypniVsechnaSvetla();
         pripravenoKActivaci = true;
         casVstupuDoOkna = millis();

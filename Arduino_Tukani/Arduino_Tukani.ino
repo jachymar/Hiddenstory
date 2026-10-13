@@ -3,7 +3,7 @@ const int PIEZO_PIN = A1;            // Senzor na pinu A1
 const int OUTPUT_PIN = 8;            // Hlavní akční pin (2 s při úspěchu)
 const int STATUS_PIN = 9;            // Stavový pin (bzučák/LED)
 
-const int THRESHOLD = 100;            // Citlivost senzoru
+const int THRESHOLD = 50;            // Citlivost senzoru
 const unsigned long DEBOUNCE_TIME_MS = 150;  // Debounce mezi jednotlivými ťuknutími
 const unsigned long RESET_TIMEOUT_MS = 3000;  // Reset paměti po 3 s nečinnosti
 const unsigned long LOCK_TIME_MS = 2000;      // Doba, po kterou zůstane výstup pin 8 aktivní

@@ -1,0 +1,10 @@
+# Arduino / arduino-cli build output (VS Code arduino.json has "output": "../build")
+build/
+*.bin
+*.elf
+*.map
+*.hex
+
+# OS / editor noise
+Thumbs.db
+.DS_Store

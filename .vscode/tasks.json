@@ -79,6 +79,19 @@
         "${file}"
       ],
       "problemMatcher": []
+    },
+    {
+      "label": "Dashboard: Generate ESP header (dashboard_html.h from Web_app/index.html)",
+      "type": "process",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\Web_app\\build_dashboard.ps1"
+      ],
+      "problemMatcher": []
     }
   ]
 }

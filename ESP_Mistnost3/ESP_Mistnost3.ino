@@ -35,12 +35,23 @@ struct_msg_to_master diag_data;
 
 // Broadcast a Master MAC
 uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-uint8_t master_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; 
+uint8_t master_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 bool master_mac_known = false;
 
 // Proměnné pro naši vlastní smyčku
 unsigned long lastPingTime = 0;
-bool beepReported = false; 
+bool beepReported = false;
+uint8_t currentSysMode = 0;
+
+// --- FRONTA ZPRÁV Z ESP-NOW ---
+// Callback OnDataRecv běží v jiném FreeRTOS tasku (WiFi) než loop(). Dříve se přímo v něm
+// komunikovalo po I2C, což kolidovalo s pravidelným čtením sběrnice v loop() (dva tasky na jedné
+// I2C sběrnici). Callback teď zprávu jen zařadí do fronty a veškerá I2C práce se dělá v loop().
+#define MSG_QUEUE_SIZE 8
+struct_msg_from_master msgQueue[MSG_QUEUE_SIZE];
+volatile uint8_t msgQueueHead = 0;
+volatile uint8_t msgQueueTail = 0;
+portMUX_TYPE msgQueueMux = portMUX_INITIALIZER_UNLOCKED;
 
 // --- DIAG STRUKTURY Z ARDUIN ---
 struct DiagTukani {
@@ -62,7 +73,7 @@ void posliPrikazI2C(int adresa, char prikaz) {
   Wire.write(prikaz);
   byte error = Wire.endTransmission();
   if (error == 0) {
-    Serial.print("I2C Odeslano '"); Serial.print(prikaz); 
+    Serial.print("I2C Odeslano '"); Serial.print(prikaz);
     Serial.print("' na adresu "); Serial.println(adresa);
   } else {
     Serial.print("Chyba I2C komunikace s adresou "); Serial.println(adresa);
@@ -78,111 +89,13 @@ uint8_t readI2CBasic(int adresa) {
   return 255; // 255 znamená, že zařízení neodpovídá
 }
 
-uint8_t currentSysMode = 0;
-
-// Callback pro prijem zprav pres ESP-NOW
-void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
-  if (len == sizeof(struct_msg_from_master)) {
-    if (!master_mac_known) {
-      memcpy(master_mac, info->src_addr, 6);
-      master_mac_known = true;
-      
-      esp_now_peer_info_t peerInfo = {};
-      memcpy(peerInfo.peer_addr, master_mac, 6);
-      peerInfo.channel = 0;
-      peerInfo.encrypt = false;
-      esp_now_add_peer(&peerInfo);
-
-      Serial.printf("Master ESP32 detekovan! MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                    master_mac[0], master_mac[1], master_mac[2],
-                    master_mac[3], master_mac[4], master_mac[5]);
-    }
-
-    struct_msg_from_master msg;
-    memcpy(&msg, incomingData, sizeof(msg));
-    Serial.print("Prijat ESP-NOW prikaz '"); Serial.print(msg.command);
-    Serial.print("' pro I2C "); Serial.print(msg.target_i2c);
-    Serial.print(" | sys_mode: "); Serial.println(msg.sys_mode);
-    
-    // Změna módu
-    if (msg.sys_mode != currentSysMode) {
-      currentSysMode = msg.sys_mode;
-      if (currentSysMode == 3) {
-        posliPrikazI2C(ADDR_AUDIO3, '3');
-      } else if (currentSysMode == 0) {
-        posliPrikazI2C(ADDR_AUDIO3, '0');
-      }
-    }
-
-    // Vyžádání diagnostiky
-    if (msg.command == 'R') {
-      DiagTukani tukani;
-      if (readI2CDiagnostics(ADDR_TUKANI, tukani)) {
-        diag_data.tukani_status = tukani.status;
-        diag_data.tukani_lock = tukani.lock_open;
-        diag_data.tukani_taps = tukani.taps;
-      }
-      DiagAudio3 audio3;
-      if (readI2CDiagnostics(ADDR_AUDIO3, audio3)) {
-        diag_data.audio3_status = audio3.status;
-        diag_data.audio3_is_playing = audio3.is_playing;
-        diag_data.audio3_is_alarm = audio3.is_alarm_playing;
-      }
-      
-      // Vyčtení logů
-      String tLog = readI2CLog(ADDR_TUKANI);
-      strncpy(diag_data.tukani_log, tLog.c_str(), 29);
-      diag_data.tukani_log[29] = '\0';
-      
-      String aLog = readI2CLog(ADDR_AUDIO3);
-      strncpy(diag_data.audio3_log, aLog.c_str(), 29);
-      diag_data.audio3_log[29] = '\0';
-
-      const uint8_t *targetAddr = master_mac_known ? master_mac : broadcastAddress;
-      esp_now_send(targetAddr, (uint8_t *) &diag_data, sizeof(diag_data));
-    } 
-    // Standardní I2C propis povelu
-    else if (msg.command != 'U') { // 'U' je jen update bez I2C cíle
-      posliPrikazI2C(msg.target_i2c, msg.command);
-    }
-  }
-}
-
-void setup() {
-  Serial.begin(115200);
-  Wire.begin(); // Master na I2C
-  
-  // ESP-NOW běží na STA
-  WiFi.mode(WIFI_STA);
-  esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
-  
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("Chyba inicializace ESP-NOW");
-    return;
-  }
-  esp_now_register_recv_cb(OnDataRecv);
-  
-  esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
-  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("Chyba pridani broadcast ESP-NOW peer");
-  } else {
-    Serial.println("ESP-NOW inicializovano (Broadcast peer pripraven).");
-  }
-  
-  Serial.println("ESP32_3 (Mistnost 3) pripraveno.");
-  Serial.print("MAC adresa: ");
-  Serial.println(WiFi.macAddress());
-}
 template <typename T>
 bool readI2CDiagnostics(int adresa, T &data) {
   Wire.beginTransmission(adresa);
   Wire.write(0x99); // Cílené vyžádání detailní diagnostiky
   Wire.endTransmission();
-  delay(1); 
-  
+  delay(1);
+
   Wire.requestFrom((uint8_t)adresa, (uint8_t)sizeof(T));
   if (Wire.available() == sizeof(T)) {
     uint8_t* ptr = (uint8_t*)&data;
@@ -198,10 +111,10 @@ bool readI2CDiagnostics(int adresa, T &data) {
 // Cteni logu z I2C (0x98)
 String readI2CLog(int adresa) {
   Wire.beginTransmission(adresa);
-  Wire.write(0x98); 
+  Wire.write(0x98);
   Wire.endTransmission();
-  delay(1); 
-  
+  delay(1);
+
   Wire.requestFrom((uint8_t)adresa, (uint8_t)30);
   String l = "";
   while (Wire.available()) {
@@ -211,14 +124,138 @@ String readI2CLog(int adresa) {
   return l;
 }
 
+// Callback pro prijem zprav pres ESP-NOW - POUZE zařadí zprávu do fronty (žádné I2C!)
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
+  if (len != sizeof(struct_msg_from_master)) return;
+
+  if (!master_mac_known) {
+    memcpy(master_mac, info->src_addr, 6);
+    master_mac_known = true;
+
+    esp_now_peer_info_t peerInfo = {};
+    memcpy(peerInfo.peer_addr, master_mac, 6);
+    peerInfo.channel = 0;
+    peerInfo.encrypt = false;
+    esp_now_add_peer(&peerInfo);
+
+    Serial.printf("Master ESP32 detekovan! MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                  master_mac[0], master_mac[1], master_mac[2],
+                  master_mac[3], master_mac[4], master_mac[5]);
+  }
+
+  portENTER_CRITICAL(&msgQueueMux);
+  uint8_t next = (msgQueueHead + 1) % MSG_QUEUE_SIZE;
+  if (next != msgQueueTail) {
+    memcpy(&msgQueue[msgQueueHead], incomingData, sizeof(struct_msg_from_master));
+    msgQueueHead = next;
+  }
+  portEXIT_CRITICAL(&msgQueueMux);
+}
+
+bool vyzvedniZpravu(struct_msg_from_master &out) {
+  bool ok = false;
+  portENTER_CRITICAL(&msgQueueMux);
+  if (msgQueueHead != msgQueueTail) {
+    out = msgQueue[msgQueueTail];
+    msgQueueTail = (msgQueueTail + 1) % MSG_QUEUE_SIZE;
+    ok = true;
+  }
+  portEXIT_CRITICAL(&msgQueueMux);
+  return ok;
+}
+
+// Zpracování zprávy od Mastera - voláno z loop(), proto zde smí být I2C
+void zpracujZpravuOdMastera(const struct_msg_from_master &msg) {
+  Serial.print("Prijat ESP-NOW prikaz '"); Serial.print(msg.command);
+  Serial.print("' pro I2C "); Serial.print(msg.target_i2c);
+  Serial.print(" | sys_mode: "); Serial.println(msg.sys_mode);
+
+  // Změna módu
+  if (msg.sys_mode != currentSysMode) {
+    currentSysMode = msg.sys_mode;
+    if (currentSysMode == 3) {
+      posliPrikazI2C(ADDR_AUDIO3, '3');
+    } else if (currentSysMode == 0) {
+      posliPrikazI2C(ADDR_AUDIO3, '0');
+    }
+  }
+
+  // Vyžádání diagnostiky
+  if (msg.command == 'R') {
+    DiagTukani tukani;
+    if (readI2CDiagnostics(ADDR_TUKANI, tukani)) {
+      diag_data.tukani_status = tukani.status;
+      diag_data.tukani_lock = tukani.lock_open;
+      diag_data.tukani_taps = tukani.taps;
+    }
+    DiagAudio3 audio3;
+    if (readI2CDiagnostics(ADDR_AUDIO3, audio3)) {
+      diag_data.audio3_status = audio3.status;
+      diag_data.audio3_is_playing = audio3.is_playing;
+      diag_data.audio3_is_alarm = audio3.is_alarm_playing;
+    }
+
+    // Vyčtení logů
+    String tLog = readI2CLog(ADDR_TUKANI);
+    strncpy(diag_data.tukani_log, tLog.c_str(), 29);
+    diag_data.tukani_log[29] = '\0';
+
+    String aLog = readI2CLog(ADDR_AUDIO3);
+    strncpy(diag_data.audio3_log, aLog.c_str(), 29);
+    diag_data.audio3_log[29] = '\0';
+
+    const uint8_t *targetAddr = master_mac_known ? master_mac : broadcastAddress;
+    esp_now_send(targetAddr, (uint8_t *) &diag_data, sizeof(diag_data));
+  }
+  // Standardní I2C propis povelu
+  else if (msg.command != 'U') { // 'U' je jen update bez I2C cíle
+    posliPrikazI2C(msg.target_i2c, msg.command);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin(); // Master na I2C
+
+  // ESP-NOW běží na STA
+  WiFi.mode(WIFI_STA);
+  esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("Chyba inicializace ESP-NOW");
+    return;
+  }
+  esp_now_register_recv_cb(OnDataRecv);
+
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("Chyba pridani broadcast ESP-NOW peer");
+  } else {
+    Serial.println("ESP-NOW inicializovano (Broadcast peer pripraven).");
+  }
+
+  Serial.println("ESP32_3 (Mistnost 3) pripraveno.");
+  Serial.print("MAC adresa: ");
+  Serial.println(WiFi.macAddress());
+}
+
 void loop() {
   unsigned long ted = millis();
+
+  // Zprávy od Mastera zařazené callbackem ESP-NOW zpracujeme zde (jediné místo s I2C)
+  struct_msg_from_master msg;
+  while (vyzvedniZpravu(msg)) {
+    zpracujZpravuOdMastera(msg);
+  }
 
   // Každých 100 ms čteme základní stavy Arduin a reagujeme na ně
   // Heartbeat do Masteru pošleme jen 1x za 500 ms
   if (ted - lastPingTime > 100) {
     lastPingTime = ted;
-    
+
     // Vyčteme zkrácený stav obou modulů (0, 1, 2... nebo 255 = offline)
     uint8_t rawTukani = readI2CBasic(ADDR_TUKANI);
     uint8_t rawAudio3 = readI2CBasic(ADDR_AUDIO3);
@@ -261,16 +298,16 @@ void loop() {
 
     // Zpracování stavů Tukani a předávání do Audio3 (pouze v herním režimu, ne v pracovním)
     if (currentSysMode != 3 && tukaniBasic != 255) {
-      if (tukaniBasic == 1 && !beepReported) { 
+      if (tukaniBasic == 1 && !beepReported) {
         beepReported = true;
         Serial.println("Mistnost 3: Tukani zada o pipnuti (Povel E)");
-        posliPrikazI2C(ADDR_AUDIO3, 'E'); 
+        posliPrikazI2C(ADDR_AUDIO3, 'E');
       } else if (tukaniBasic == 2 && !solvedReported) {
         solvedReported = true;
         Serial.println("Mistnost 3: Tukani vyreseno (Povel D)");
         posliPrikazI2C(ADDR_AUDIO3, 'D');
       } else if (tukaniBasic == 0) {
-        beepReported = false; 
+        beepReported = false;
         solvedReported = false;
       }
     }

@@ -6,8 +6,9 @@
     <title>Dashboard - Hidden Story</title>
     <style>
         :root {
-            --bg-color: #141b38;
+            --bg-color: #0f111a;
             --panel-bg: #1e2130;
+            --card-bg: #181b2a;
             --text-main: #e2e8f0;
             --text-muted: #94a3b8;
             --accent-blue: #3b82f6;
@@ -17,11 +18,16 @@
             --status-red: #ef4444;
             --status-green: #10b981;
             --border-color: #334155;
+            --border-light: rgba(255, 255, 255, 0.08);
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         body {
             margin: 0;
-            padding: 2rem 1rem;
+            padding: 1.5rem 1rem;
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-main);
@@ -29,15 +35,14 @@
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
-            box-sizing: border-box;
         }
 
         .dashboard-container {
             width: 100%;
-            max-width: 900px;
+            max-width: 950px;
             display: flex;
             flex-direction: column;
-            gap: 1.5rem;
+            gap: 1.25rem;
         }
 
         /* HEADER */
@@ -47,10 +52,11 @@
             align-items: center;
             padding-bottom: 1rem;
             border-bottom: 1px solid var(--border-color);
-            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 1rem;
         }
 
-        .header h1 {
+        .header-title h1 {
             margin: 0;
             font-size: 1.5rem;
             font-weight: 400;
@@ -58,9 +64,15 @@
             text-transform: uppercase;
         }
 
-        .header h1 strong {
+        .header-title h1 strong {
             font-weight: 700;
             color: var(--accent-orange);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
         }
 
         /* STATUS BADGE */
@@ -70,20 +82,26 @@
             gap: 0.6rem;
             padding: 0.5rem 1rem;
             border-radius: 9999px;
-            font-size: 0.875rem;
+            font-size: 0.85rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            background-color: rgba(239, 68, 68, 0.1);
+            background-color: rgba(239, 68, 68, 0.12);
             color: var(--status-red);
-            border: 1px solid rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.25);
             transition: all 0.3s ease;
         }
 
         .status-indicator.connected {
-            background-color: rgba(16, 185, 129, 0.1);
+            background-color: rgba(16, 185, 129, 0.12);
             color: var(--status-green);
-            border: 1px solid rgba(16, 185, 129, 0.2);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+
+        .status-indicator.connecting {
+            background-color: rgba(245, 158, 11, 0.12);
+            color: var(--accent-orange);
+            border: 1px solid rgba(245, 158, 11, 0.25);
         }
 
         .status-dot {
@@ -91,13 +109,14 @@
             height: 8px;
             border-radius: 50%;
             background-color: currentColor;
+            box-shadow: 0 0 6px currentColor;
         }
 
         /* GRID LAYOUT */
         .grid-layout {
             display: grid;
             grid-template-columns: 1fr;
-            gap: 1.5rem;
+            gap: 1.25rem;
         }
 
         @media (min-width: 768px) {
@@ -109,73 +128,45 @@
             }
         }
 
-        /* CONFIG MODULE */
-        .config-panel {
-            background-color: var(--panel-bg);
-            border-radius: 12px;
-            padding: 1.5rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            margin-bottom: 1.5rem;
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-
-        .config-panel label {
-            font-size: 0.875rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            font-weight: 600;
-        }
-
-        .config-panel input {
-            background-color: var(--bg-color);
-            border: 1px solid var(--border-color);
-            color: var(--text-main);
-            padding: 0.75rem;
-            border-radius: 8px;
-            font-size: 1rem;
-            width: 100%;
-            box-sizing: border-box;
-        }
-
-        .config-panel input:focus {
-            outline: none;
-            border-color: var(--accent-blue);
-        }
-
         /* CARDS */
         .card {
             background-color: var(--panel-bg);
             border-radius: 12px;
-            padding: 1.5rem;
+            padding: 1.25rem;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-light);
         }
 
         .card h2 {
             margin-top: 0;
-            margin-bottom: 1.2rem;
-            font-size: 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.95rem;
             color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 1px;
             font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         /* BUTTONS */
         button {
             width: 100%;
-            padding: 0.875rem 1.5rem;
+            padding: 0.85rem 1.25rem;
             border-radius: 8px;
             border: none;
-            font-size: 1rem;
+            font-size: 0.95rem;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s ease;
             color: #fff;
-            margin-bottom: 0.75rem;
+            margin-bottom: 0.65rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            user-select: none;
         }
 
         button:last-child {
@@ -183,7 +174,7 @@
         }
 
         button:active {
-            transform: translateY(1px);
+            transform: scale(0.98);
         }
 
         .btn-primary {
@@ -201,12 +192,19 @@
         }
 
         .btn-outline:hover {
-            background-color: rgba(255, 255, 255, 0.05);
+            background-color: rgba(255, 255, 255, 0.06);
             border-color: var(--text-muted);
         }
 
+        .btn-outline.active-mode {
+            background-color: rgba(59, 130, 246, 0.2);
+            border-color: var(--accent-blue);
+            color: #93c5fd;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.25);
+        }
+
         .btn-warning {
-            background-color: rgba(245, 158, 11, 0.15);
+            background-color: rgba(245, 158, 11, 0.12);
             color: var(--accent-orange);
             border: 1px solid rgba(245, 158, 11, 0.3);
         }
@@ -215,99 +213,136 @@
             background-color: rgba(245, 158, 11, 0.25);
         }
 
+        .btn-sm {
+            font-size: 0.75rem;
+            padding: 0.35rem 0.75rem;
+            width: auto;
+            margin-bottom: 0;
+        }
+
         /* SUB-GRID FOR BUTTONS */
         .btn-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 0.75rem;
+            gap: 0.65rem;
         }
 
         .btn-grid button {
             margin-bottom: 0;
         }
 
-        /* TERMINAL / DIAGNOSTICS */
-        .system-health {
+        /* MODULE STATUS GRID */
+        .module-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-            gap: 0.5rem;
-            margin-top: 1rem;
-            margin-bottom: 1rem;
-            background: #0f1322;
-            padding: 1rem;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
+            gap: 0.6rem;
         }
 
-        .health-item {
+        .module-badge {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.6rem 0.75rem;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            justify-content: space-between;
             font-size: 0.8rem;
-            color: var(--text-muted);
-            padding: 0.3rem;
-            border-radius: 4px;
-            background: rgba(255,255,255,0.02);
+            font-weight: 500;
         }
 
-        .health-dot {
+        .module-badge .dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
             background-color: var(--status-red);
-            flex-shrink: 0;
-            box-shadow: 0 0 5px rgba(239, 68, 68, 0.4);
+            box-shadow: 0 0 4px var(--status-red);
+            transition: all 0.3s ease;
         }
 
-        .health-item.ok .health-dot {
+        .module-badge.online {
+            border-color: rgba(16, 185, 129, 0.3);
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        .module-badge.online .dot {
             background-color: var(--status-green);
-            box-shadow: 0 0 5px rgba(16, 185, 129, 0.4);
+            box-shadow: 0 0 6px var(--status-green);
         }
 
-        .health-item.ok {
-            color: var(--text-main);
-        }
-
+        /* TERMINAL / LOGS */
         .terminal-container {
-            background-color: #050505;
-            border: 1px solid #222;
+            background-color: #070913;
+            border: 1px solid var(--border-color);
             border-radius: 8px;
-            padding: 1rem;
-            margin-top: 1rem;
-            height: 250px;
+            padding: 0.75rem;
+            height: 140px;
             overflow-y: auto;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.8rem;
+            color: #a7f3d0;
+            line-height: 1.4;
         }
 
-        .terminal-container pre {
+        .terminal-container .log-entry {
             margin: 0;
-            color: #22c55e;
-            font-family: 'Consolas', 'Courier New', monospace;
-            font-size: 0.85rem;
             white-space: pre-wrap;
             word-wrap: break-word;
         }
 
-        /* FOOTER & DEV LINK */
-        .footer {
-            margin-top: 2rem;
-            text-align: right;
-            padding-top: 1rem;
-            border-top: 1px solid var(--border-color);
+        .terminal-container .log-entry.log-err {
+            color: #fca5a5;
         }
 
-        .dev-link {
-            font-size: 0.75rem;
+        .terminal-container .log-entry.log-cmd {
+            color: #93c5fd;
+        }
+
+        /* CONFIG ROW */
+        .config-row {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            font-size: 0.85rem;
             color: var(--text-muted);
-            cursor: pointer;
-            opacity: 0.3;
-            transition: opacity 0.2s, color 0.2s;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            user-select: none;
         }
 
-        .dev-link:hover {
-            opacity: 1;
+        .config-row input {
+            background: #0f111a;
+            border: 1px solid var(--border-color);
+            color: #fff;
+            padding: 0.4rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            width: 150px;
+            text-align: center;
+        }
+
+        .config-row input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .mode-info {
+            margin-top: 0.75rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .mode-info.alarm {
+            color: var(--status-red);
+            font-weight: 600;
+        }
+
+        .pulse-btn {
+            animation: pulse-border 0.4s ease;
+        }
+
+        @keyframes pulse-border {
+            0% { transform: scale(0.96); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); }
         }
     </style>
 </head>
@@ -315,14 +350,17 @@
 
     <div class="dashboard-container">
         
+        <!-- HEADER -->
         <header class="header">
-            <div style="display: flex; flex-direction: column;">
+            <div class="header-title">
                 <h1>Hidden Story <strong>Operator</strong></h1>
-                <button id="btnConnectUsb" class="btn-outline" style="font-size: 0.75rem; padding: 0.3rem 0.6rem; width: auto; margin-top: 0.5rem; align-self: flex-start;" onclick="connectUsb()">Připojit přes USB (Web Serial)</button>
             </div>
-            <div id="statusBadge" class="status-indicator">
-                <div class="status-dot"></div>
-                <span id="statusText">Odpojeno</span>
+            <div class="header-actions">
+                <button id="btnConnectUsb" class="btn-outline btn-sm" onclick="connectUsb()">Připojit USB</button>
+                <div id="statusBadge" class="status-indicator">
+                    <div class="status-dot"></div>
+                    <span id="statusText">Odpojeno</span>
+                </div>
             </div>
         </header>
 
@@ -330,90 +368,83 @@
             
             <!-- GAME MODES MODULE -->
             <div class="card">
-                <h2>Herní Módy</h2>
-                <button class="btn-outline" onclick="sendCommand('0')">Standardní Hra</button>
-                <button class="btn-outline" onclick="sendCommand('3')">Pracovní Mód</button>
+                <h2>Herní Režim</h2>
+                <button id="btnMode0" class="btn-outline" onclick="sendCommand('0', this)">Standardní Hra (0)</button>
+                <button id="btnMode3" class="btn-outline" onclick="sendCommand('3', this)">Pracovní Mód (3)</button>
+                <div class="mode-info" id="modeInfo">Aktuální režim: neznámý</div>
+            </div>
+
+            <!-- LASER DETECTION MODULE -->
+            <div class="card">
+                <h2>Detekce Laseru (Herní Mód)</h2>
+                <div class="btn-grid">
+                    <button id="btnLaserDetectOn" class="btn-outline active-mode" onclick="sendCommand('Z', this)">Zapnuto (Výchozí)</button>
+                    <button id="btnLaserDetectOff" class="btn-outline" onclick="sendCommand('Y', this)">Vypnuto (Ignorovat)</button>
+                </div>
+                <div class="mode-info" id="laserDetectInfo" style="margin-top: 0.75rem;">Stav snímání v herním módu: Zapnuto</div>
             </div>
 
             <!-- LOCKS MODULE -->
             <div class="card">
-                <h2>Manuální Ovládání</h2>
+                <h2>Manuální Ovládání Schránek</h2>
                 <div class="btn-grid">
-                    <button class="btn-warning" onclick="sendCommand('A')">Lebka</button>
-                    <button class="btn-warning" onclick="sendCommand('B')">Tlačítka</button>
-                    <button class="btn-warning" onclick="sendCommand('C')">Kola</button>
-                    <button class="btn-warning" onclick="sendCommand('E')">Oltář (Ťukání)</button>
+                    <button class="btn-warning" onclick="sendCommand('A', this)">Lebka (A)</button>
+                    <button class="btn-warning" onclick="sendCommand('B', this)">Tlačítka (B)</button>
+                    <button class="btn-warning" onclick="sendCommand('C', this)">Kola (C)</button>
+                    <button class="btn-warning" onclick="sendCommand('E', this)">Oltář / Ťukání (E)</button>
+                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('F', this)">Magnetická Kulička (F)</button>
                 </div>
             </div>
 
-            <!-- DIAGNOSTICS MODULE (HIDDEN) -->
-            <div class="card span-full" id="diagPanel" style="display: none;">
-                <h2>Systémová Diagnostika</h2>
-                <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
-                    <label style="font-size: 0.8rem; color: var(--text-muted);">IP ESP32:</label>
-                    <input type="text" id="ipAddress" value="192.168.0.100" style="background: #111; border: 1px solid #333; color: #fff; padding: 0.3rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">
+            <!-- HARDWARE STATUS -->
+            <div class="card span-full">
+                <h2>Stav Komponent & Sběrnice</h2>
+                <div class="module-grid">
+                    <div class="module-badge" id="mod-eth"><span>LAN (ENC28J60)</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-laser"><span>Lasery</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-tlacitka"><span>Tlačítka</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-kola"><span>Kola</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-lebka"><span>Lebka</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-svetla"><span>Světla</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-audio"><span>Audio 1 & 2</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-m3"><span>ESP Místnost 3</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-tukani"><span>Ťukání (M3)</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-audio3"><span>Audio 3 (M3)</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-wled1"><span>WLED 1</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-wled2"><span>WLED 2</span><div class="dot"></div></div>
+                    <div class="module-badge" id="mod-wled3"><span>WLED 3</span><div class="dot"></div></div>
                 </div>
+            </div>
 
-                <h3 style="font-size: 0.85rem; color: var(--text-muted); margin: 0 0 0.5rem 0; text-transform: uppercase;">Stav Komponent</h3>
-                <div class="system-health" id="systemHealth">
-                    <div class="health-item" id="h-laser"><div class="health-dot"></div>Laser (13)</div>
-                    <div class="health-item" id="h-tlac"><div class="health-dot"></div>Tlačítka (11)</div>
-                    <div class="health-item" id="h-lebka"><div class="health-dot"></div>Lebka (15)</div>
-                    <div class="health-item" id="h-kola"><div class="health-dot"></div>Kola (12)</div>
-                    <div class="health-item" id="h-svetla"><div class="health-dot"></div>Světla (14)</div>
-                    <div class="health-item" id="h-m3"><div class="health-dot"></div>ESP M3 (WiFi)</div>
-                    <div class="health-item" id="h-tukani"><div class="health-dot"></div>Ťukání (20)</div>
-                    <div class="health-item" id="h-audio3"><div class="health-dot"></div>Audio3 (21)</div>
-                    <div class="health-item" id="h-lcd"><div class="health-dot"></div>LCD (0x27)</div>
+            <!-- LOGS / DIAGNOSTICS -->
+            <div class="card span-full">
+                <h2>
+                    <span>Systémový Log</span>
+                    <span id="lastUpdateText" style="font-size: 0.75rem; text-transform: none; color: var(--text-muted); font-weight: normal;"></span>
+                </h2>
+                <div class="terminal-container" id="terminalLog">
+                    <div class="log-entry">Aplikace spuštěna. Inicializuji spojení...</div>
                 </div>
+            </div>
 
-                <div style="margin-bottom: 1rem;">
-                    <label style="font-size: 0.8rem; color: var(--text-muted);">Vyberte modul pro detailní diagnostiku:</label>
-                    <select id="moduleSelect" onchange="selectModule(this.value)" style="width:100%; padding:0.5rem; background:#111; color:#fff; border:1px solid #333; border-radius:4px; margin-top:0.5rem; font-size:0.9rem;">
-                        <option value="0">-- Žádný (Vypnuto) --</option>
-                        <option value="1">Modul 1: Lebka</option>
-                        <option value="2">Modul 2: Světla</option>
-                        <option value="3">Modul 3: Tlačítka</option>
-                        <option value="4">Modul 4: Kola (Analogy)</option>
-                        <option value="5">Modul 5: Laser</option>
-                        <option value="6">Místnost 3: ESP32 (Ťukání + Audio)</option>
-                    </select>
-                </div>
-                
-                <!-- TLAČÍTKA PRO KONKRÉTNÍ MODUL A NÁSTROJE -->
-                <div id="moduleActions" style="display: none; gap: 0.5rem; margin-bottom: 1rem;">
-                    <button class="btn-outline" style="font-size: 0.8rem; padding: 0.5rem; flex: 1;" onclick="setDiagMode('sensors')">Hodnoty senzorů</button>
-                    <button class="btn-outline" style="font-size: 0.8rem; padding: 0.5rem; flex: 1;" onclick="setDiagMode('logs')">Serial log</button>
-                </div>
-
-                <div style="margin-bottom: 1rem;">
-                    <button class="btn-warning" style="font-size: 0.8rem; padding: 0.5rem;" onclick="sendCommand('I')">Spustit I2C Skener (Test Sběrnice)</button>
-                </div>
-
-                <div class="terminal-container" style="display:flex; flex-direction:column; height: 350px;">
-                    <div id="diagStatus" style="flex: 1; overflow-y: auto; padding-bottom: 0.5rem; margin-bottom: 0.5rem; white-space: pre-wrap; color: #38bdf8; font-family: 'Consolas', monospace; font-size: 0.85rem;">
-                        Vyberte modul pro diagnostiku...
+            <!-- CONFIGURATION -->
+            <div class="card span-full" style="background: transparent; border-color: rgba(255,255,255,0.05);">
+                <div class="config-row">
+                    <div>
+                        <span>IP adresa ESP32 Master: </span>
+                        <input type="text" id="ipAddress" value="192.168.0.100" placeholder="192.168.0.100">
                     </div>
-                    <div id="diagTerminal" style="display: none; flex: 1; overflow-y: auto; color: #22c55e; font-family: 'Consolas', monospace; font-size: 0.85rem;">
-                        <div style="color: #666;">--- Historie Logů ---</div>
-                    </div>
+                    <span style="font-size: 0.75rem;">Podpora: HTTP REST API & Web Serial API</span>
                 </div>
             </div>
 
         </div>
 
-        <footer class="footer">
-            <span class="dev-link" onclick="toggleDevMode()">System Config</span>
-        </footer>
-
     </div>
 
     <script>
         const DEFAULT_IP = '192.168.0.100';
-        let devMode = false;
         let isConnected = false;
-        let lastLogMessage = "";
-        let currentDiagMode = 'sensors';
 
         // --- PROMĚNNÉ PRO USB SERIAL ---
         let serialPort = null;
@@ -422,24 +453,47 @@
 
         const statusBadge = document.getElementById('statusBadge');
         const statusText = document.getElementById('statusText');
-        const diagPanel = document.getElementById('diagPanel');
-        const diagStatus = document.getElementById('diagStatus');
-        const diagTerminal = document.getElementById('diagTerminal');
-        const devLink = document.querySelector('.dev-link');
         const ipInput = document.getElementById('ipAddress');
+        const terminalLog = document.getElementById('terminalLog');
+        const lastUpdateText = document.getElementById('lastUpdateText');
+        const btnConnectUsb = document.getElementById('btnConnectUsb');
+        const btnMode0 = document.getElementById('btnMode0');
+        const btnMode3 = document.getElementById('btnMode3');
+        const modeInfo = document.getElementById('modeInfo');
+        const btnLaserDetectOn = document.getElementById('btnLaserDetectOn');
+        const btnLaserDetectOff = document.getElementById('btnLaserDetectOff');
+        const laserDetectInfo = document.getElementById('laserDetectInfo');
 
-        // Reset staré IP (192.168.1.100) na novou podsíť
+        const MODE_NAMES = { 0: 'Herní (0)', 1: 'ALARM laseru (1)', 2: 'Dohráno (2)', 3: 'Pracovní (3)' };
+        const isOn = (v) => v === 1 || v === true || v === '1';
+
+        function addLog(msg, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + (type === 'err' ? 'log-err' : (type === 'cmd' ? 'log-cmd' : ''));
+            const time = new Date().toLocaleTimeString();
+            entry.textContent = `[${time}] ${msg}`;
+            terminalLog.appendChild(entry);
+            if (terminalLog.children.length > 50) {
+                terminalLog.removeChild(terminalLog.children[0]);
+            }
+            terminalLog.scrollTop = terminalLog.scrollHeight;
+        }
+
+        // Automatické určení IP adresy
         let savedIp = localStorage.getItem('esp_master_ip');
-        if (!savedIp || savedIp.includes('192.168.1.')) {
+        if (window.location.hostname && window.location.hostname !== '' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            savedIp = window.location.hostname;
+        } else if (!savedIp || savedIp.includes('192.168.1.')) {
             savedIp = DEFAULT_IP;
-            localStorage.setItem('esp_master_ip', DEFAULT_IP);
         }
         ipInput.value = savedIp;
+        localStorage.setItem('esp_master_ip', savedIp);
 
         ipInput.addEventListener('change', () => {
             const cleanIp = ipInput.value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
             ipInput.value = cleanIp || DEFAULT_IP;
             localStorage.setItem('esp_master_ip', ipInput.value);
+            addLog(`IP adresa změněna na: ${ipInput.value}`);
             scheduleNextPoll(100);
         });
 
@@ -451,13 +505,15 @@
             return ip;
         }
 
-        // --- ROBUSTNÍ SÍŤOVÝ SPRÁVCE (Garantuje max. 1 aktivní požadavek na ENC28J60) ---
-        let isNetworkBusy = false;
-        let pollTimer = null;
-        let failedCount = 0;
-        const MAX_FAILS_BEFORE_OFFLINE = 3;
-        const NORMAL_POLL_INTERVAL = 1200; // ms
-        const RETRY_POLL_INTERVAL = 1800;  // ms
+        function setBadgeStatus(badgeId, isOnline) {
+            const el = document.getElementById(badgeId);
+            if (!el) return;
+            if (isOnline) {
+                el.classList.add('online');
+            } else {
+                el.classList.remove('online');
+            }
+        }
 
         function setConnectionState(state, modeText = '') {
             if (state === 'connected') {
@@ -466,19 +522,65 @@
                 statusBadge.className = 'status-indicator connected';
             } else if (state === 'connecting') {
                 statusText.textContent = 'Připojování...';
-                statusBadge.className = 'status-indicator';
-                statusBadge.style.color = 'var(--accent-orange)';
-                statusBadge.style.borderColor = 'rgba(245, 158, 11, 0.3)';
-                statusBadge.style.backgroundColor = 'rgba(245, 158, 11, 0.1)';
+                statusBadge.className = 'status-indicator connecting';
             } else {
                 isConnected = false;
                 statusText.textContent = 'Odpojeno';
                 statusBadge.className = 'status-indicator';
-                statusBadge.style.color = '';
-                statusBadge.style.borderColor = '';
-                statusBadge.style.backgroundColor = '';
             }
         }
+
+        function handleTelemetryData(data) {
+            setConnectionState('connected', serialPort ? 'Připojeno (USB)' : 'Připojeno (LAN)');
+            lastUpdateText.textContent = 'Aktualizováno: ' + new Date().toLocaleTimeString();
+
+            // Aktualizace aktivního módu (1 = alarm laseru je stále "hra", zvýrazní se ale textově)
+            if (data.mode !== undefined) {
+                const m = Number(data.mode);
+                btnMode3.classList.toggle('active-mode', m === 3);
+                btnMode0.classList.toggle('active-mode', m !== 3);
+                modeInfo.textContent = 'Aktuální režim: ' + (MODE_NAMES[m] || m);
+                modeInfo.classList.toggle('alarm', m === 1);
+            }
+
+            // Aktualizace stavu ignorování laseru
+            if (data.laser && data.laser.ign !== undefined) {
+                const isIgn = isOn(data.laser.ign);
+                btnLaserDetectOff.classList.toggle('active-mode', isIgn);
+                btnLaserDetectOn.classList.toggle('active-mode', !isIgn);
+                if (laserDetectInfo) {
+                    laserDetectInfo.textContent = isIgn
+                        ? 'Stav snímání v herním módu: Vypnuto (Ignorovat)'
+                        : 'Stav snímání v herním módu: Zapnuto (Výchozí)';
+                }
+            }
+
+            // Aktualizace hardwarových modulů.
+            // ESP posílá online příznaky vnořené v objektu "online" (viz buildTelemetryState v ESP_Master.ino).
+            const o = data.online || {};
+            setBadgeStatus('mod-eth', isOn(o.eth));
+            setBadgeStatus('mod-laser', isOn(o.laser));
+            setBadgeStatus('mod-tlacitka', isOn(o.tlacitka));
+            setBadgeStatus('mod-kola', isOn(o.kola));
+            setBadgeStatus('mod-lebka', isOn(o.lebka));
+            setBadgeStatus('mod-svetla', isOn(o.svetla));
+            setBadgeStatus('mod-audio', isOn(o.audio));
+            setBadgeStatus('mod-m3', isOn(o.m3));
+            setBadgeStatus('mod-tukani', isOn(o.m3_tukani));
+            setBadgeStatus('mod-audio3', isOn(o.m3_audio3));
+            setBadgeStatus('mod-wled1', isOn(o.wled1));
+            setBadgeStatus('mod-wled2', isOn(o.wled2));
+            setBadgeStatus('mod-wled3', isOn(o.wled3));
+        }
+
+        // --- SÍŤOVÝ SPRÁVCE PRO ENC28J60 ---
+        let isNetworkBusy = false;
+        let pollTimer = null;
+        let activeAbortController = null;
+        let failedCount = 0;
+        const MAX_FAILS_BEFORE_OFFLINE = 3;
+        const NORMAL_POLL_INTERVAL = 2000;
+        const RETRY_POLL_INTERVAL = 3000;
 
         function scheduleNextPoll(delayMs = NORMAL_POLL_INTERVAL) {
             if (pollTimer) {
@@ -488,140 +590,6 @@
             if (!serialPort) {
                 pollTimer = setTimeout(fetchState, delayMs);
             }
-        }
-
-        function updateHealthDot(id, isOk) {
-            const el = document.getElementById(id);
-            if (el) {
-                if (isOk) el.classList.add('ok');
-                else el.classList.remove('ok');
-            }
-        }
-
-        function handleTelemetryData(data) {
-            setConnectionState('connected', serialPort ? 'Připojeno (USB)' : 'Připojeno (LAN)');
-
-            if (devMode && data.online) {
-                // Aktualizace panelu "Stav Komponent" na základě tvrdých True/False z I2C sběrnice
-                updateHealthDot('h-laser', data.online.laser === 1);
-                updateHealthDot('h-tlac', data.online.tlacitka === 1);
-                updateHealthDot('h-lebka', data.online.lebka === 1);
-                updateHealthDot('h-kola', data.online.kola === 1);
-                updateHealthDot('h-svetla', data.online.svetla === 1);
-                updateHealthDot('h-lcd', data.online.lcd === 1);
-                
-                // Místnost 3
-                updateHealthDot('h-m3', data.online.m3 === 1);
-                updateHealthDot('h-tukani', data.online.m3_tukani === 1);
-                updateHealthDot('h-audio3', data.online.m3_audio3 === 1);
-
-                if (data.diag_text) {
-                    diagStatus.textContent = data.diag_text;
-                    
-                    if (data.diag_log && data.diag_log !== lastLogMessage && data.diag_log !== "Start" && data.diag_log !== "") {
-                        lastLogMessage = data.diag_log;
-                        const time = new Date().toLocaleTimeString('cs-CZ');
-                        const logDiv = document.createElement('div');
-                        logDiv.innerHTML = `<span style="color:#888">[${time}]</span> ${data.diag_log}`;
-                        diagTerminal.appendChild(logDiv);
-                        diagTerminal.scrollTop = diagTerminal.scrollHeight;
-                    }
-                } else {
-                    diagStatus.textContent = JSON.stringify(data, null, 2);
-                }
-            }
-        }
-
-        async function connectUsb() {
-            if (!('serial' in navigator)) {
-                alert('Váš prohlížeč nepodporuje Web Serial API. Použijte Chrome, Edge nebo Operu.');
-                return;
-            }
-            
-            try {
-                serialPort = await navigator.serial.requestPort();
-                await serialPort.open({ baudRate: 115200 });
-                
-                serialWriter = serialPort.writable.getWriter();
-                const textDecoder = new TextDecoderStream();
-                serialPort.readable.pipeTo(textDecoder.writable);
-                serialReader = textDecoder.readable.getReader();
-                
-                document.getElementById('btnConnectUsb').textContent = 'USB Připojeno (Odpojit restartem stránky)';
-                document.getElementById('btnConnectUsb').style.color = 'var(--status-green)';
-                document.getElementById('btnConnectUsb').style.borderColor = 'var(--status-green)';
-                
-                if (pollTimer) {
-                    clearTimeout(pollTimer);
-                    pollTimer = null;
-                }
-
-                readSerialLoop();
-                sendCommand("GET_STATE"); // Okamžitá žádost o data po připojení
-            } catch (err) {
-                console.error('Chyba USB připojení:', err);
-            }
-        }
-
-        async function readSerialLoop() {
-            let buffer = "";
-            try {
-                while (true) {
-                    const { value, done } = await serialReader.read();
-                    if (done) break;
-                    if (value) {
-                        buffer += value;
-                        let lines = buffer.split('\n');
-                        buffer = lines.pop(); // Poslední nekompletní řádek si necháme na příště
-                        
-                        for (let line of lines) {
-                            line = line.trim();
-                            if (line.startsWith("TELEMETRY:")) {
-                                try {
-                                    handleTelemetryData(JSON.parse(line.substring(10)));
-                                } catch(e) {}
-                            } else if (devMode && currentDiagMode === 'logs' && line.length > 0 && !line.startsWith("{")) {
-                                const time = new Date().toLocaleTimeString('cs-CZ');
-                                const logDiv = document.createElement('div');
-                                logDiv.innerHTML = `<span style="color:#f59e0b">[ESP]</span> <span style="color:#888">[${time}]</span> ${line}`;
-                                diagTerminal.appendChild(logDiv);
-                                diagTerminal.scrollTop = diagTerminal.scrollHeight;
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error("USB odpojeno", e);
-                serialPort = null;
-                setConnectionState('disconnected');
-                document.getElementById('btnConnectUsb').textContent = 'Připojit přes USB (Web Serial)';
-                document.getElementById('btnConnectUsb').style.color = '';
-                document.getElementById('btnConnectUsb').style.borderColor = '';
-                scheduleNextPoll(500);
-            }
-        }
-
-        function setDiagMode(mode) {
-            currentDiagMode = mode;
-            if (mode === 'sensors') {
-                diagStatus.style.display = 'block';
-                diagTerminal.style.display = 'none';
-            } else if (mode === 'logs') {
-                diagStatus.style.display = 'none';
-                diagTerminal.style.display = 'block';
-            }
-        }
-
-        function selectModule(val) {
-            if (val == 0) {
-                document.getElementById('moduleActions').style.display = 'none';
-            } else {
-                document.getElementById('moduleActions').style.display = 'flex';
-            }
-            sendCommand('D' + val);
-            diagStatus.textContent = "Vyžádání dat z modulu " + val + "...";
-            diagTerminal.innerHTML = '<div style="color: #666;">--- Historie Logů Modulu ' + val + ' ---</div>';
-            lastLogMessage = ""; // Reset history tracker on module change
         }
 
         async function fetchState() {
@@ -638,20 +606,25 @@
             }
 
             isNetworkBusy = true;
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            activeAbortController = new AbortController();
+            const timeoutId = setTimeout(() => {
+                if (activeAbortController) activeAbortController.abort();
+            }, 3500);
 
             try {
                 const response = await fetch(`${baseUrl}/api/state`, {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' },
                     cache: 'no-store',
-                    signal: controller.signal
+                    signal: activeAbortController.signal
                 });
                 clearTimeout(timeoutId);
 
                 if (response.ok) {
                     const data = await response.json();
+                    if (failedCount >= MAX_FAILS_BEFORE_OFFLINE || !isConnected) {
+                        addLog('LAN připojení navázáno.', 'info');
+                    }
                     failedCount = 0;
                     handleTelemetryData(data);
                     scheduleNextPoll(NORMAL_POLL_INTERVAL);
@@ -659,79 +632,67 @@
                     throw new Error(`HTTP ${response.status}`);
                 }
             } catch (error) {
-                failedCount++;
-                if (failedCount >= MAX_FAILS_BEFORE_OFFLINE) {
-                    setConnectionState('disconnected');
-                } else if (isConnected) {
-                    setConnectionState('connecting');
+                if (error.name !== 'AbortError') {
+                    failedCount++;
+                    if (failedCount >= MAX_FAILS_BEFORE_OFFLINE) {
+                        if (isConnected) {
+                            addLog(`LAN spojení ztraceno: ${error.message || 'Nedostupné'}`, 'err');
+                        }
+                        setConnectionState('disconnected');
+                    } else if (isConnected) {
+                        setConnectionState('connecting');
+                    }
+                    scheduleNextPoll(RETRY_POLL_INTERVAL);
                 }
-                scheduleNextPoll(RETRY_POLL_INTERVAL);
             } finally {
                 isNetworkBusy = false;
+                activeAbortController = null;
             }
         }
 
-        // Spuštění po načtení stránky
-        scheduleNextPoll(100);
-
-        function toggleDevMode() {
-            if (!devMode) {
-                let pwd = prompt("Zadejte přístupový kód (Developer Mode):");
-                if (pwd === "1234") {
-                    devMode = true;
-                    diagPanel.style.display = 'block';
-                    devLink.textContent = 'Disable System Config';
-                    devLink.style.color = 'var(--status-green)';
-                    devLink.style.opacity = '1';
-                    document.getElementById('moduleSelect').value = "0";
-                    sendCommand('X1');
-                } else if (pwd !== null) {
-                    alert("Nesprávný přístupový kód.");
-                }
-            } else {
-                devMode = false;
-                diagPanel.style.display = 'none';
-                devLink.textContent = 'System Config';
-                devLink.style.color = 'var(--text-muted)';
-                devLink.style.opacity = '0.3';
-                sendCommand('X0');
+        async function sendCommand(cmd, btnElement = null) {
+            if (btnElement) {
+                btnElement.classList.add('pulse-btn');
+                setTimeout(() => btnElement.classList.remove('pulse-btn'), 400);
             }
-        }
 
-        async function sendCommand(cmd) {
+            addLog(`Odesílám příkaz: '${cmd}'`, 'cmd');
+
             if (serialPort && serialWriter) {
                 try {
                     const encoder = new TextEncoder();
                     await serialWriter.write(encoder.encode(cmd + '\n'));
-                    console.log('USB Odesláno:', cmd);
+                    addLog(`USB příkaz '${cmd}' odeslán.`, 'info');
                 } catch (err) {
-                    console.error('Chyba při odesílání přes USB:', err);
+                    addLog(`Chyba odeslání přes USB: ${err}`, 'err');
                 }
                 return;
             }
 
             const baseUrl = getBaseUrl();
             if (!baseUrl) {
-                console.warn('Chybí IP adresa!');
+                addLog('Chybí IP adresa ESP32!', 'err');
                 return;
             }
 
-            // Zastavíme plánovaný polling po dobu odesílání příkazu
             if (pollTimer) {
                 clearTimeout(pollTimer);
                 pollTimer = null;
             }
+            if (activeAbortController) {
+                activeAbortController.abort();
+                activeAbortController = null;
+            }
 
-            // Pokud právě dobíhá GET požadavek, krátce počkáme (max 200ms)
             let waitAttempts = 0;
-            while (isNetworkBusy && waitAttempts < 4) {
+            while (isNetworkBusy && waitAttempts < 2) {
                 await new Promise(r => setTimeout(r, 50));
                 waitAttempts++;
             }
 
             isNetworkBusy = true;
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            const timeoutId = setTimeout(() => controller.abort(), 3500);
 
             try {
                 const response = await fetch(`${baseUrl}/api/command`, {
@@ -746,20 +707,92 @@
                 if (response.ok) {
                     failedCount = 0;
                     setConnectionState('connected', 'Připojeno (LAN)');
-                    console.log('Příkaz úspěšně doručen:', cmd);
-                    // Okamžitá aktualizace stavu pro okamžitou odezvu v UI
+                    addLog(`Příkaz '${cmd}' úspěšně proveden.`, 'info');
                     scheduleNextPoll(100);
                 } else {
-                    console.warn(`Příkaz vrátil status: ${response.status}`);
+                    addLog(`Chyba příkazu: HTTP ${response.status}`, 'err');
                     scheduleNextPoll(500);
                 }
             } catch (error) {
-                console.error('Chyba při odesílání příkazu:', error);
+                addLog(`Chyba při odesílání: ${error.message}`, 'err');
                 scheduleNextPoll(1000);
             } finally {
                 isNetworkBusy = false;
             }
         }
+
+        // --- OBSLUHA WEB SERIAL (USB) ---
+        async function connectUsb() {
+            if (!('serial' in navigator)) {
+                alert('Váš prohlížeč nepodporuje Web Serial API. Použijte Chrome, Edge nebo Opera.');
+                return;
+            }
+            
+            try {
+                serialPort = await navigator.serial.requestPort();
+                await serialPort.open({ baudRate: 115200 });
+                
+                serialWriter = serialPort.writable.getWriter();
+                const textDecoder = new TextDecoderStream();
+                serialPort.readable.pipeTo(textDecoder.writable);
+                serialReader = textDecoder.readable.getReader();
+                
+                btnConnectUsb.textContent = 'USB Připojeno';
+                btnConnectUsb.style.color = 'var(--status-green)';
+                btnConnectUsb.style.borderColor = 'var(--status-green)';
+                
+                if (pollTimer) {
+                    clearTimeout(pollTimer);
+                    pollTimer = null;
+                }
+
+                addLog('USB Serial port otevřen (115200 bd).', 'info');
+                readSerialLoop();
+                
+                const encoder = new TextEncoder();
+                await serialWriter.write(encoder.encode('GET_STATE\n'));
+            } catch (err) {
+                addLog(`Chyba USB připojení: ${err.message || err}`, 'err');
+            }
+        }
+
+        async function readSerialLoop() {
+            let buffer = "";
+            try {
+                while (true) {
+                    const { value, done } = await serialReader.read();
+                    if (done) break;
+                    if (value) {
+                        buffer += value;
+                        let lines = buffer.split('\n');
+                        buffer = lines.pop();
+                        
+                        for (let line of lines) {
+                            line = line.trim();
+                            if (line.startsWith("TELEMETRY:")) {
+                                try {
+                                    const json = JSON.parse(line.substring(10));
+                                    handleTelemetryData(json);
+                                } catch(e) {}
+                            } else if (line.length > 0) {
+                                addLog(`ESP: ${line}`);
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                addLog('USB odpojeno.', 'err');
+                serialPort = null;
+                setConnectionState('disconnected');
+                btnConnectUsb.textContent = 'Připojit USB';
+                btnConnectUsb.style.color = '';
+                btnConnectUsb.style.borderColor = '';
+                scheduleNextPoll(500);
+            }
+        }
+
+        // Spuštění po načtení
+        scheduleNextPoll(200);
     </script>
 </body>
 </html>

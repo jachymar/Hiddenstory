@@ -43,8 +43,8 @@ const int rychlostFading = 24;
 const int servoZavreno = 180;
 const int servoOtevreno = 30;
 
-const int limitAktivace = 560;
-const int limitDeaktivace = 545;
+const int limitAktivace = 540;
+const int limitDeaktivace = 525;
 const int dobaPotvrzeniCile = 200;
 
 bool krystalAktivni[3] = {false, false, false};
@@ -233,6 +233,7 @@ void loop() {
             Log("Odpocet hotov. Oteviram!");
             stavHry = ODEMYKANI;
             casZmenyStavu = ted;
+            cmdOpenLock = true; // Spustit otevření zámku i serva
           }
         }
         break;

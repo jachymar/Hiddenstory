@@ -6,6 +6,7 @@
     #include <SPI.h>
     #include <EthernetENC.h>
     #include <LiquidCrystal_I2C.h> // Knihovna pro LCD
+    #include "dashboard_html.h" // Obsahuje frontend aplikaci
 
     // --- LCD DISPLEJ (I2C Adresa obvykle 0x27) ---
     LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -198,6 +199,7 @@
     unsigned long casOtevreniDveri1 = 0;
     bool laserAktivovanDvermi = false;
     uint8_t minulyStavDveri1 = 255;
+    bool laserIgnored = false; // Ignorování přerušení laseru v herním módu
 
     void updateLCD() {
       unsigned long ted = millis();
@@ -514,21 +516,23 @@
 
     String buildTelemetryState() {
       String json = "";
-      json.reserve(640);
+      json.reserve(900);
       json += "{";
       json += "\"mode\":" + String(lastGameMode) + ",";
       json += "\"lebka\":{\"st\":" + String(dataLebka.status) + ",\"c_mask\":" + String(dataLebka.crystals_mask) + ",\"k1\":" + String(dataLebka.k1_val) + ",\"k2\":" + String(dataLebka.k2_val) + ",\"k3\":" + String(dataLebka.k3_val) + ",\"lock\":" + String(dataLebka.lock_open) + "},";
       json += "\"svetla\":{\"st\":" + String(dataSvetla.status) + ",\"run\":" + String(dataSvetla.mode_running) + ",\"led\":" + String(dataSvetla.current_led) + ",\"m_idl\":" + String(dataSvetla.magnet_idle) + ",\"m_val\":" + String(dataSvetla.magnet_val) + "},";
       json += "\"tlacitka\":{\"st\":" + String(dataTlacitka.status) + ",\"lock\":" + String(dataTlacitka.lock_open) + ",\"prs\":" + String(dataTlacitka.presses) + ",\"idl\":" + String(dataTlacitka.idle_time) + "},";
       json += "\"kola\":{\"st\":" + String(dataKola.status) + ",\"mask\":" + String(dataKola.active_mask) + ",\"a1\":" + String(dataKola.a1_val) + ",\"a2\":" + String(dataKola.a2_val) + ",\"a3\":" + String(dataKola.a3_val) + "},";
-      json += "\"laser\":{\"st\":" + String(dataLaser.status) + ",\"on\":" + String(dataLaser.laser_on) + ",\"ldr\":" + String(dataLaser.ldr_val) + ",\"fail\":" + String(dataLaser.fails) + "},";
+      json += "\"laser\":{\"st\":" + String(dataLaser.status) + ",\"on\":" + String(dataLaser.laser_on) + ",\"ldr\":" + String(dataLaser.ldr_val) + ",\"fail\":" + String(dataLaser.fails) + ",\"ign\":" + String(laserIgnored ? "1" : "0") + "},";
       json += "\"m3_tukani\":{\"st\":" + String(m3_data.tukani_status) + ",\"lock\":" + String(m3_data.tukani_lock) + ",\"taps\":" + String(m3_data.tukani_taps) + "},";
       json += "\"m3_audio\":{\"st\":" + String(m3_data.audio3_status) + ",\"play\":" + String(m3_data.audio3_is_playing) + ",\"alarm\":" + String(m3_data.audio3_is_alarm) + "},";
       
       // Tvrdé online stavy pro diagnostiku Dashboardu
       bool lcd_on = true;
       
+      // Dashboard (Web_app/index.html) čte VŠECHNY online příznaky z tohoto objektu "online"
       json += "\"online\":{";
+      json += "\"eth\":" + String(eth_connected ? "1" : "0") + ",";
       json += "\"laser\":" + String(laser_online ? "1" : "0") + ",";
       json += "\"tlacitka\":" + String(tlacitka_online ? "1" : "0") + ",";
       json += "\"lebka\":" + String(lebka_online ? "1" : "0") + ",";
@@ -536,7 +540,10 @@
       json += "\"svetla\":" + String(svetla_online ? "1" : "0") + ",";
       json += "\"audio\":" + String(audio_online ? "1" : "0") + ",";
       json += "\"lcd\":" + String(lcd_on ? "1" : "0") + ",";
-      
+      json += "\"wled1\":" + String(wled1_status ? "1" : "0") + ",";
+      json += "\"wled2\":" + String(wled2_status ? "1" : "0") + ",";
+      json += "\"wled3\":" + String(wled3_status ? "1" : "0") + ",";
+
       bool is_m3 = (millis() - lastM3Heartbeat <= 30000);
       json += "\"m3\":" + String(is_m3 ? "1" : "0") + ",";
       json += "\"m3_tukani\":" + String((is_m3 && m3_data.tukani_status != 255) ? "1" : "0") + ",";
@@ -550,66 +557,102 @@
       return json;
     }
 
+    // Telemetrie pro USB variantu dashboardu (Web Serial API). Posílá se při každé změně
+    // a navíc nejméně 1x za 2 s jako heartbeat, aby dashboard poznal, že spojení žije.
+    // (Dříve se volala jen v Dev módu, takže přes USB dashboard nikdy nic nedostal.)
     void posliTelemetryState(unsigned long ted) {
       if (ted - posledniStateSendMs < 200) return;
+      posledniStateSendMs = ted;
 
+      static unsigned long posledniHeartbeat = 0;
       String json = buildTelemetryState();
-      if (json != posledniStateJson) {
+      bool zmena = (json != posledniStateJson);
+      bool heartbeat = (ted - posledniHeartbeat >= 2000);
+      if (zmena || heartbeat) {
         posledniStateJson = json;
-        // Odesílání přes BLE odstraněno. Telemetrie se nyní čte na vyžádání přes HTTP API.
+        posledniHeartbeat = ted;
         Serial.println("TELEMETRY:" + json); // Zabaleno s prefixem pro Web Serial API (USB)
       }
-
-      posledniStateSendMs = ted;
     }
 
+    // Příkazy z webu (POST /api/command) a z USB (Web Serial). Jeden znak + případný parametr.
+    //   0-3  změna herního módu            A  otevřít schránku Lebka
+    //   B    otevřít schránku Tlačítka      C  otevřít schránku Kola
+    //   E    otevřít zámek Ťukání (M3)      F  vysypat magnetickou kuličku (servo na Světlech)
+    //   Xn   Developer mód 1/0              Dn vybrat modul pro diagnostiku (D0 = žádný)
+    //   I    I2C skener
     void processCommand(String msg) {
       msg.trim();
-      if (msg.length() > 0) {
-        char cmd = msg.charAt(0);
-        
-        // Změna Módu (0, 1, 2, 3) z webové aplikace
-        if (cmd >= '0' && cmd <= '3') {
+      if (msg.length() == 0) return;
+      char cmd = msg.charAt(0);
+
+      switch (cmd) {
+        case '0': case '1': case '2': case '3': {
           int novyMod = cmd - '0';
           lastGameMode = novyMod;
           physGameMode = novyMod;
           processGameModeChange(lastGameMode);
           Serial.print("Web vnutil novy rezim: "); Serial.println(cmd);
+          break;
         }
-        // Povel pro tajnou schránku (A, B, C, D, E) z webové aplikace
-        else if (cmd >= 'A' && cmd <= 'E') {
-          Serial.print("Web žada otevreni schranky: "); Serial.println(cmd);
-          if (cmd == 'A') posliPrikazI2C(ADDR_LEBKA, 'A');
-          else if (cmd == 'B') {
-            posliPrikazI2C(ADDR_TLACITKA, 'B');
-            posliPrikazI2C(ADDR_SVETLA, 'O');
-          }
-          else if (cmd == 'C') posliPrikazI2C(ADDR_KOLA, 'C');
-          else if (cmd == 'D') Serial.println("POZOR: Oltar zatim nema I2C adresu!");
-          else if (cmd == 'E') posliPrikazM3(20, 'O');
-        }
-        // Developer Mód (X1 / X0)
-        else if (cmd == 'X') {
+        case 'A':
+          Serial.println("Web zada otevreni schranky: Lebka (A)");
+          posliPrikazI2C(ADDR_LEBKA, 'A');
+          break;
+        case 'Y':
+          Serial.println("Web zada ignorovani laseru (Y)");
+          laserIgnored = true;
+          posliPrikazI2C(ADDR_LASER, 'Y');
+          break;
+        case 'Z':
+          Serial.println("Web zada zapnuti detekce laseru (Z)");
+          laserIgnored = false;
+          posliPrikazI2C(ADDR_LASER, 'Z');
+          break;
+        case 'B':
+          Serial.println("Web zada otevreni schranky: Tlacitka (B)");
+          posliPrikazI2C(ADDR_TLACITKA, 'B');
+          posliPrikazI2C(ADDR_SVETLA, 'O');
+          break;
+        case 'C':
+          Serial.println("Web zada otevreni schranky: Kola (C)");
+          posliPrikazI2C(ADDR_KOLA, 'C');
+          break;
+        case 'E':
+          Serial.println("Web zada otevreni zamku: Tukani / Oltar (E)");
+          posliPrikazM3(20, 'O');
+          break;
+        case 'F':
+          // Dříve bez obsluhy - tlačítko na webu nedělalo nic
+          Serial.println("Web zada vysypani magneticke kulicky (F) -> Svetla 'E'");
+          posliPrikazI2C(ADDR_SVETLA, 'E');
+          break;
+        case 'X': {
+          // Developer Mód (X1 / X0)
           int val = msg.substring(1).toInt();
           devModeActive = (val == 1);
           Serial.print("Master: Dev Mod nastaven na: "); Serial.println(devModeActive);
           Serial2.println(msg); // Preposlat do WLED (pro zmenu jeho chovani, pokud by bylo treba)
           if (!devModeActive) { activeDiagModule = 0; diagText = "Zadny modul neni vybran..."; diagLogMsg = ""; }
+          break;
         }
-        // Diagnostický dotaz (D0, D1, D2...)
-        else if (cmd == 'D') {
+        case 'D':
+          // Diagnostický dotaz (D0, D1, D2...). Dříve nedosažitelné - 'D' spolklo rozpětí 'A'..'E'.
           activeDiagModule = msg.substring(1).toInt();
           Serial.print("Vybran diag modul: "); Serial.println(activeDiagModule);
           diagText = "Nacitam detailni data z modulu " + String(activeDiagModule) + "...";
           diagLogMsg = "";
-        }
-        // Nástroje (I2C skener)
-        else if (cmd == 'I') {
+          break;
+        case 'I':
+          // Nástroje (I2C skener)
           activeDiagModule = 99;
           diagText = scanI2C();
           diagLogMsg = "I2C Skener dokoncil praci.";
           Serial.println(diagText);
-        }
+          break;
+        default:
+          Serial.print("Neznamy prikaz: "); Serial.println(msg);
+          break;
       }
     }
 
@@ -677,7 +720,17 @@
                       "Access-Control-Max-Age: 86400\r\n"
                       "Connection: close\r\n\r\n";
         client.print(resp);
-      } else if (reqMethod == "GET" && (reqPath == "/api/state" || reqPath == "/")) {
+      } else if (reqMethod == "GET" && reqPath == "/") {
+        // Hlavní stránka servíruje Dashboard HTML.
+        // dashboard_html.h je GENEROVANÝ soubor (UTF-8) z Web_app/index.html - viz Web_app/build_dashboard.ps1
+        client.print("HTTP/1.1 200 OK\r\n");
+        client.print("Content-Type: text/html; charset=utf-8\r\n");
+        client.print("Cache-Control: no-cache\r\n");
+        client.print("Content-Length: " + String(DASHBOARD_HTML_LEN) + "\r\n");
+        client.print("Connection: close\r\n\r\n");
+        client.write((const uint8_t*)dashboard_html, DASHBOARD_HTML_LEN);
+      } else if (reqMethod == "GET" && reqPath == "/api/state") {
+        // API pro stav systému
         String payload = buildTelemetryState();
         String resp = "HTTP/1.1 200 OK\r\n"
                       "Access-Control-Allow-Origin: *\r\n"
@@ -716,7 +769,9 @@
     }
 
     void setup() {
-      // Debugování do počítače
+      // Debugování do počítače + telemetrie pro USB dashboard.
+      // Větší TX buffer, aby ~1 kB řádek TELEMETRY neblokoval hlavní smyčku (výchozí FIFO má jen 128 B).
+      Serial.setTxBufferSize(2048);
       Serial.begin(115200);
       
       // Komunikace s ESP32 č.1 (Komunikační brány) přes Sériovou linku UART2
@@ -817,6 +872,7 @@
           usbBuffer = "";
           msg.trim();
           if (msg == "GET_STATE") {
+            posledniStateJson = buildTelemetryState();
             Serial.println("TELEMETRY:" + posledniStateJson);
           } else if (msg.length() > 0) {
             processCommand(msg);
@@ -865,10 +921,10 @@
         lastCrystalsState = physCrystalsState;
         lastSvetlaState = physSvetlaState;
         
-        // Oznámí stavy komunikační brány
+        // Oznámí stavy komunikační brány (neznámý stav -1 posíláme jako 0, ne jako "C-1")
         processGameModeChange(lastGameMode);
-        Serial2.println("C" + String(lastColorButton));
-        Serial2.println("K" + String(lastCrystalsState));
+        Serial2.println("C" + String(lastColorButton >= 0 ? lastColorButton : 0));
+        Serial2.println("K" + String(lastCrystalsState >= 0 ? lastCrystalsState : 0));
         Serial2.println("S" + String(lastSvetlaState >= 0 ? lastSvetlaState : 0));
         
         inicializaceHotova = true;
@@ -896,8 +952,8 @@
         laser_online = (s != 255);
         if (laser_online) { 
           // Laser posílá už jen 1 (Alarm) nebo 0 (Klid)
-          // V PRACOVNÍM MÓDU (lastGameMode == 3) LASER NIKDY NEMĚNÍ MÓD (mód 3 může vypnout pouze tlačítko nebo aplikace)
-          if (lastGameMode != 3) {
+          // V PRACOVNÍM MÓDU (lastGameMode == 3) nebo při ignorování laseru LASER NIKDY NEMĚNÍ MÓD (mód 3 může vypnout pouze tlačítko nebo aplikace)
+          if (lastGameMode != 3 && !laserIgnored) {
             if (s == 1 && lastGameMode != 1) { // Pokud dojde k přerušení laseru
               lastGameMode = 1;
               physGameMode = 1;
@@ -953,25 +1009,23 @@
         uint8_t prectenoSvetla = readI2CBasic(ADDR_SVETLA);
         svetla_online = (prectenoSvetla != 255);
 
-        // Herní akce a přepínání světel se vyhodnocují pouze v herním módu (0) nebo po dohrání (2), v pracovním módu (3) ani v alarmu (1) se neprovádí
-        if (lastGameMode == 0 || lastGameMode == 2) { 
-          bool zmenaTlacitek = false;
-          bool zmenaLebky = false;
-          bool zmenaSvetel = false;
-          int s3 = physColorButton, s8 = physCrystalsState, s14 = physSvetlaState;
-
+        // --- HERNÍ UDÁLOSTI, KTERÉ NESMÍ PROPADNOUT ANI BĚHEM ALARMU (1) ---
+        // Blokuje je pouze pracovní mód (3). Stavy 4/5 z Tlačítek trvají jen 1 s, takže kdyby se
+        // vyhodnocovaly jen v herním módu, během ~17 s laserového alarmu by se nenávratně ztratily
+        // (schránka by byla otevřená, ale Světla by o tom nevěděla a kaskáda by šla spustit znovu).
+        if (lastGameMode != 3) {
           if (tlacitka_online) {
             static bool chybaOdeslana = false;
             static bool otevrenoOdeslano = false;
             if (prectenoTlacitka == 4) {
-              // Bylo zadáno špatné heslo 3x
+              // 3x špatné heslo nebo 30 s neaktivity -> servo na Světlech vysype kuličku
               if (!chybaOdeslana) {
                 posliPrikazI2C(ADDR_SVETLA, 'E');
                 Serial.println("Odesilan prikaz E (Chyba) na Svetla.");
                 chybaOdeslana = true;
               }
             } else if (prectenoTlacitka == 5) {
-              // Schránka otevřena tlačítky!
+              // Schránka otevřena tlačítky -> zastavit kaskádu a zablokovat její další spouštění
               if (!otevrenoOdeslano) {
                 posliPrikazI2C(ADDR_SVETLA, 'O');
                 Serial.println("Odesilan prikaz O (Schranka otevrena) na Svetla.");
@@ -979,50 +1033,53 @@
               }
             } else {
               chybaOdeslana = false;
-              if (prectenoTlacitka != 5) {
-                otevrenoOdeslano = false;
-              }
-              if (prectenoTlacitka != physColorButton && prectenoTlacitka != 3 && prectenoTlacitka != 5) { 
-                s3 = prectenoTlacitka; 
-                physColorButton = prectenoTlacitka; 
-                zmenaTlacitek = true; 
-              }
+              otevrenoOdeslano = false;
             }
           }
-          
-          if (lebka_online && prectenoLebka != physCrystalsState) { 
-            s8 = prectenoLebka; 
-            physCrystalsState = prectenoLebka; 
-            zmenaLebky = true; 
-          }
 
+          // Kaskáda na Světlech (status 1 = kulička na magnetu, animace běží)
           if (svetla_online && prectenoSvetla != physSvetlaState) {
-            s14 = prectenoSvetla;
             physSvetlaState = prectenoSvetla;
-            zmenaSvetel = true;
-          }
-          
-          if (zmenaTlacitek) {
-            lastColorButton = s3;
-            Serial2.println("C" + String(lastColorButton)); 
-          }
-          
-          if (zmenaLebky) {
-            if (lastGameMode == 0) {
-              if (s8 == 2 && lastCrystalsState != 2) {
-                posliPrikazI2C(ADDR_AUDIO, 'K');
-                posliPrikazI2C(ADDR_LEBKA, 'A'); // Automaticky otevrit schranku
-              }
-              else if (s8 != 2 && lastCrystalsState == 2) posliPrikazI2C(ADDR_AUDIO, '0');
+            lastSvetlaState = prectenoSvetla;
+            if (prectenoSvetla == 1) {
+              // Spustí na Tlačítkách 30s odpočet neaktivity (po jeho uplynutí hlásí 4 -> kulička se vysype).
+              // Tlačítka příkaz 'M' uměla, ale Master ho nikdy neposílal.
+              posliPrikazI2C(ADDR_TLACITKA, 'M');
             }
-            lastCrystalsState = s8;
-            Serial2.println("K" + String(lastCrystalsState)); 
-          }
-
-          if (zmenaSvetel) {
-            lastSvetlaState = s14;
+            // WLED si stav uloží i během alarmu a aplikuje ho při návratu do herního módu
             Serial2.println("S" + String(lastSvetlaState));
             Serial.print("Master: Stav animace svetel zmenen na "); Serial.println(lastSvetlaState);
+          }
+        }
+
+        // --- OSTATNÍ HERNÍ AKCE POUZE V HERNÍM MÓDU (0) NEBO PO DOHRÁNÍ (2) ---
+        // V alarmu (1) počkají na návrat do hry (stav krystalů je trvalý, nic se neztratí),
+        // v pracovním módu (3) se neprovádí.
+        if (lastGameMode == 0 || lastGameMode == 2) {
+          // Barevné tlačítko pro WLED efekt (hodnoty 1/2). Tlačítka aktuálně hlásí jen 0/4/5,
+          // takže sem reálně dorazí jen 0 - logika ponechána pro kompatibilitu s WLED (C<n>).
+          if (tlacitka_online && prectenoTlacitka != 3 && prectenoTlacitka != 4 && prectenoTlacitka != 5 &&
+              prectenoTlacitka != physColorButton) {
+            physColorButton = prectenoTlacitka;
+            lastColorButton = prectenoTlacitka;
+            Serial2.println("C" + String(lastColorButton));
+          }
+
+          if (lebka_online && prectenoLebka != physCrystalsState) {
+            int s8 = prectenoLebka;
+            physCrystalsState = prectenoLebka;
+            if (lastGameMode == 0) {
+              if (s8 == 2 && lastCrystalsState != 2) {
+                // Všechny 3 krystaly na místě -> vítězná hudba + WLED (níže).
+                // Schránku si Lebka otevírá SAMA po svém 7s odpočtu (Arduino_Lebka: ODPOCET -> cmdOpenLock).
+                // Dřívější automatické 'A' odsud odpočet obcházelo a schránka se pak otevírala 2x.
+                posliPrikazI2C(ADDR_AUDIO, 'K');
+              } else if (s8 != 2 && lastCrystalsState == 2) {
+                posliPrikazI2C(ADDR_AUDIO, '0');
+              }
+            }
+            lastCrystalsState = s8;
+            Serial2.println("K" + String(lastCrystalsState));
           }
         }
         posledniI2C = millis();
@@ -1105,6 +1162,9 @@
         posledniDiagTime = millis();
       }
 
+      // --- 3. TELEMETRIE PRO USB DASHBOARD (změna nebo heartbeat 1x za 2 s) ---
+      posliTelemetryState(millis());
+
       // Voláme updateLCD pořád dokola kvůli blikání a rolování spodního textu
       updateLCD();
-    }
+    } 
