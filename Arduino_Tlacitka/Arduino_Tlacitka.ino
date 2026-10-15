@@ -4,7 +4,7 @@
 #define SLAVE_ADDR 11 // Adresa prvního Arduina
 
 /* --- KONFIGURACE PINŮ A HESLA --- */
-const int tlacitka[] = {2, 3, 4, 5, 6};
+const int tlacitka[] = {2, 3, 4, 5, 6}; //Heslo: 1,4,2,3 (Tlačítka 1-4) | Tlačítko 5 je opakovatelné
 const int pinServoZamek = 9;   
 const int heslo[] = {1, 4, 2, 3}; 
 
@@ -62,7 +62,7 @@ void setup() {
 
   servoZamek.attach(pinServoZamek);
   servoZamek.write(0);
-  posledniAktivitaHesla = millis();
+  posledniAktivitaHesla = millis(); 
 
   Serial.println("==========================================");
   Serial.println("      MODUL 1: KLAVESNICE STARTUJE        ");
