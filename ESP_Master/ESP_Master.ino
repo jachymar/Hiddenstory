@@ -462,8 +462,55 @@
       return (error == 0);
     }
 
+    // Funkce pro otevření všech herních schránek (Lebka, Tlačítka, Kola, Oltář v M3)
+    void otevriVsechnySchranky() {
+      Serial.println("Oteviram vsechny schranky (Lebka, Tlacitka, Kola, Tukani/Oltar)...");
+      posliPrikazI2C(ADDR_LEBKA, 'A');
+      delay(20);
+      posliPrikazI2C(ADDR_TLACITKA, 'B');
+      delay(20);
+      posliPrikazI2C(ADDR_SVETLA, 'O');
+      delay(20);
+      posliPrikazI2C(ADDR_KOLA, 'C');
+      delay(20);
+      posliPrikazM3(20, 'O');
+    }
+
+    // Sledování délky běhu herního módu pro automatické otevření všech schránek při přechodu do pracovního módu
+    const unsigned long MIN_DOBA_HRY_PRO_OTEVRENI_MS = 10UL * 60UL * 1000UL; // 10 minut
+    unsigned long casStartuHernihoModu = 0; // Čas zahájení nepřetržitého herního módu (módy != 3)
+
     // Zpracování hlavní systémové změny a informování Audia a Komunikační brány
     void processGameModeChange(int mode) {
+      static int predchoziMod = -1;
+      bool autoOtevritSchranky = false;
+
+      // Pokud přecházíme do pracovního módu (3) z herního módu (cokoliv != 3)
+      if (mode == 3 && predchoziMod != 3) {
+        if (casStartuHernihoModu > 0) {
+          unsigned long dobaHernihoModu = millis() - casStartuHernihoModu;
+          if (dobaHernihoModu >= MIN_DOBA_HRY_PRO_OTEVRENI_MS) {
+            autoOtevritSchranky = true;
+            Serial.print("Herni mod trval ");
+            Serial.print(dobaHernihoModu / 60000);
+            Serial.println(" min (>= 10 min) -> Prechod do pracovniho modu: Automaticke otevreni vsech schranek!");
+          } else {
+            Serial.print("Herni mod trval pouze ");
+            Serial.print(dobaHernihoModu / 1000);
+            Serial.println(" s (< 10 min) -> Schranky se automaticky neoteviraji.");
+          }
+        }
+        casStartuHernihoModu = 0; // V pracovním módu odpočet herního módu neběží
+      } else if (mode != 3) {
+        // Vstup do herního módu:
+        // Spouštíme odpočet pouze pokud jsme předtím nebyli v herním módu (např. start systému nebo přechod z 3)
+        // Přechody mezi 0 a 1 (laser alarm) časovač herního módu nerestartují!
+        if (casStartuHernihoModu == 0) {
+          casStartuHernihoModu = millis();
+          Serial.println("Herni mod aktivni: Start mereni doby hry (pro auto-otevreni schranek).");
+        }
+      }
+
       // 1. Změna hudby podle nového stavu
       char audioPrikaz = '0' + mode; 
       if (mode == 0 && lastCrystalsState == 2) {
@@ -482,8 +529,16 @@
         posliPrikazI2C(ADDR_SVETLA, 'E');   // Vysypání kuličky při přechodu do pracovního módu
         posliPrikazI2C(ADDR_SVETLA, '3');   // Reset stavu světel pro pracovní mód
         posliPrikazI2C(ADDR_TLACITKA, '3'); // Reset tlačítek pro novou hru / pracovní mód
+
+        if (autoOtevritSchranky) {
+          otevriVsechnySchranky();
+        }
       } else if (mode == 0) {
         posliPrikazI2C(ADDR_SVETLA, 'R');   // Reset pro novou hru
+        if (predchoziMod == 3) {
+          posliPrikazI2C(ADDR_TLACITKA, '3'); // Reset stavu schránky po pracovním módu
+          delay(10);
+        }
         posliPrikazI2C(ADDR_TLACITKA, '0');
         casOtevreniDveri1 = 0;
         laserAktivovanDvermi = false;
@@ -497,6 +552,8 @@
       // 3. Aktualizace LCD Displeje (kompaktní zobrazení)
       updateLCD();  posliPrikazM3(0, 'U'); // Informujeme Místnost 3 o změně módu pro její WLED
       Serial.print("Logika: Režim změněn na "); Serial.println(mode);
+
+      predchoziMod = mode;
     }
 
     String sanitizeJsonString(const String& input) {

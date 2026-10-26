@@ -143,10 +143,8 @@ void handleAnalog(unsigned long ted) {
     }
     
     if (startCasPodminkyAnalog != 0 && (ted - startCasPodminkyAnalog >= 1500) && !aktivaceDokoncena) {
-      if (!pracovniMod) {
-        Log("1.5s ubehlo! Oteviram.");
-        aktivujAnalogServo(ted);
-      }
+      Log("1.5s ubehlo! Oteviram.");
+      aktivujAnalogServo(ted);
     }
   } 
   else {

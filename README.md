@@ -46,7 +46,7 @@ by the Laser Arduino over a UART bridge, and the Laser caches Lebka's status/tel
 |---|---|---|
 | 0 | Game | Default, mode button, web/USB `0`, automatic return from alarm |
 | 1 | Laser alarm | Automatically when the Laser reports status 1; ends ~17 s later |
-| 3 | Maintenance | Mode button, web/USB `3`. Resets puzzles, lights to service colour, laser always on |
+| 3 | Maintenance | Mode button, web/USB `3`. Resets puzzles, lights to service colour, laser always on. If game mode ran for ≥ 10 minutes, automatically opens all boxes (Lebka, Tlačítka, Kola, Tukani) |
 
 Mode 2 ("finished") is accepted from the API but nothing sets it today.
 
