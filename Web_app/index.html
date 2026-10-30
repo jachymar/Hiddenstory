@@ -387,12 +387,15 @@
             <!-- LOCKS MODULE -->
             <div class="card">
                 <h2>Manuální Ovládání Schránek</h2>
+                <div class="mode-info" id="lockStatusInfo">Stav Tlačítkové schránky: ČEKÁM NA DATA...</div>
                 <div class="btn-grid">
                     <button class="btn-warning" onclick="sendCommand('A', this)">Lebka (A)</button>
                     <button class="btn-warning" onclick="sendCommand('B', this)">Tlačítka (B)</button>
                     <button class="btn-warning" onclick="sendCommand('C', this)">Kola (C)</button>
                     <button class="btn-warning" onclick="sendCommand('E', this)">Oltář / Ťukání (E)</button>
-                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('F', this)">Magnetická Kulička (F)</button>
+                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('F', this)">Vynucené vysypání kuličky (F)</button>
+                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('L', this)">Spustit světelnou kaskádu (L)</button>
+                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('U', this)">Odblokovat schránku Tlačítka (U)</button>
                 </div>
             </div>
 
@@ -571,6 +574,19 @@
             setBadgeStatus('mod-wled1', isOn(o.wled1));
             setBadgeStatus('mod-wled2', isOn(o.wled2));
             setBadgeStatus('mod-wled3', isOn(o.wled3));
+
+            // Aktualizace stavu Tlačítkové schránky (zda neblokuje kuličku a světla)
+            const lockStatusInfo = document.getElementById('lockStatusInfo');
+            if (lockStatusInfo && data.tlacitka) {
+                const isLocked = isOn(data.tlacitka.lock);
+                if (isLocked) {
+                    lockStatusInfo.textContent = 'Tlačítková schránka: OTEVŘENA (Blokuje kuličku a světla)';
+                    lockStatusInfo.classList.add('alarm');
+                } else {
+                    lockStatusInfo.textContent = 'Tlačítková schránka: ZAVŘENA';
+                    lockStatusInfo.classList.remove('alarm');
+                }
+            }
         }
 
         // --- SÍŤOVÝ SPRÁVCE PRO ENC28J60 ---

@@ -623,9 +623,17 @@
           posliPrikazM3(20, 'O');
           break;
         case 'F':
-          // Dříve bez obsluhy - tlačítko na webu nedělalo nic
-          Serial.println("Web zada vysypani magneticke kulicky (F) -> Svetla 'E'");
-          posliPrikazI2C(ADDR_SVETLA, 'E');
+          Serial.println("Web zada vynucene vysypani magneticke kulicky (F) -> Svetla 'F'");
+          posliPrikazI2C(ADDR_SVETLA, 'F');
+          break;
+        case 'L':
+          Serial.println("Web zada spusteni svetelne kaskady (L) -> Svetla 'L'");
+          posliPrikazI2C(ADDR_SVETLA, 'L');
+          break;
+        case 'U':
+          Serial.println("Web zada odblokovani schranky a reset tlacitek (U) -> Svetla 'U', Tlacitka 'R'");
+          posliPrikazI2C(ADDR_SVETLA, 'U');
+          posliPrikazI2C(ADDR_TLACITKA, 'R');
           break;
         case 'X': {
           // Developer Mód (X1 / X0)
