@@ -579,6 +579,7 @@
     //   0-3  změna herního módu            A  otevřít schránku Lebka
     //   B    otevřít schránku Tlačítka      C  otevřít schránku Kola
     //   E    otevřít zámek Ťukání (M3)      F  vysypat magnetickou kuličku (servo na Světlech)
+    //   R    aktivace audio rytmu (M3)      L  spustit světelnou kaskádu
     //   Xn   Developer mód 1/0              Dn vybrat modul pro diagnostiku (D0 = žádný)
     //   I    I2C skener
     void processCommand(String msg) {
@@ -621,6 +622,10 @@
         case 'E':
           Serial.println("Web zada otevreni zamku: Tukani / Oltar (E)");
           posliPrikazM3(20, 'O');
+          break;
+        case 'R':
+          Serial.println("Web zada aktivaci audio rytmu M3 (Audio 3 'A')");
+          posliPrikazM3(21, 'A');
           break;
         case 'F':
           Serial.println("Web zada vynucene vysypani magneticke kulicky (F) -> Svetla 'F'");

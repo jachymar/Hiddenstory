@@ -35,6 +35,7 @@ and build steps; this file carries conventions, decisions, current status and th
 - Laser ignore switch `Y`/`Z` (added by the user 2026-10-11).
 - WLED gateway pings one strip per 3.3 s with a 150 ms connect timeout and handles WiFi loss.
 - Room 3 queues ESP-NOW messages and does I2C only in `loop()`.
+- Manual activation of room 3 audio rhythm: web/USB command `R` -> master sends ESP-NOW `A` to I2C 21 (Audio 3), playable in both game and maintenance modes.
 
 ## Status 2026-10-13
 

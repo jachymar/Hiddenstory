@@ -53,7 +53,7 @@ void receiveEvent(int howMany) {
       pracovniMod = false;
     }
     else if (c == 'A') {
-      if (!pracovniMod) cmdAlarm = true;
+      cmdAlarm = true; // Rytmus lze spustit i v pracovnim modu
     }
     else if (c == 'E') {
       if (!pracovniMod) cmdBeep = true;
@@ -154,7 +154,7 @@ void loop() {
   
   if (cmdAlarm) {
     cmdAlarm = false;
-    Log("I2C Povel: ALARM SPUSTEN!");
+    Log("I2C Povel: Rytmus spusten!");
     filePlayer.stopPlaying();
     filePlayer.startPlayingFile(TRACK_FINAL);
     isPlayingHint = true;

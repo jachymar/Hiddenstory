@@ -508,8 +508,9 @@ const char dashboard_html[] = R"rawliteral(<!DOCTYPE html>
                     <button class="btn-warning" onclick="sendCommand('B', this)">Tlačítka</button>
                     <button class="btn-warning" onclick="sendCommand('C', this)">Kola</button>
                     <button class="btn-warning" onclick="sendCommand('E', this)">Oltář / Ťukání</button>
-                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('F', this)">Vynucené vysypání kuličky</button>
-                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('L', this)">Spustit světelnou kaskádu</button>
+                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('R', this)">Audio rytmus (Místnost 3)</button>
+                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('F', this)">Vypadnutí kuličky</button>
+                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('L', this)">Světelná kombinace</button>
                 </div>
             </div>
 
@@ -940,7 +941,6 @@ const char dashboard_html[] = R"rawliteral(<!DOCTYPE html>
     </script>
 </body>
 </html>
-
 )rawliteral";
 
 // Delka HTML bez ukoncovaci nuly - pouzito pro hlavicku Content-Length
