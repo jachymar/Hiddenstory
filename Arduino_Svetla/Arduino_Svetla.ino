@@ -20,7 +20,7 @@ const unsigned long ochrannaLhuta = 800;          // 0,8s (800ms) v klidu pro re
 
 /* --- AUTO-KALIBRACE MAGNETU --- */
 int klidovaHodnota = 0;
-const int deltaThreshold = 10; // O kolik se musí hodnota změnit pro aktivaci (citlivost)
+const int deltaThreshold = 6; // O kolik se musí hodnota změnit pro aktivaci (citlivost)
 
 // Proměnné pro 2 minutový průměr
 const int velikostBufferu = 120; // 120 vteřin = 2 minuty
