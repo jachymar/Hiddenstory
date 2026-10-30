@@ -1,7 +1,7 @@
 // ============================================================================
 //  GENEROVANY SOUBOR - NEEDITOVAT RUCNE!
 //  Zdroj:     Web_app/index.html
-//  Generator: Web_app/build_dashboard.ps1   (spust po kazde zmene index.html)
+//  Generator: python snippet
 //  Kodovani:  UTF-8 bez BOM (ESP stranku serviruje s charset=utf-8)
 // ============================================================================
 #pragma once
@@ -71,6 +71,8 @@ const char dashboard_html[] = R"rawliteral(<!DOCTYPE html>
             font-weight: 400;
             letter-spacing: 1px;
             text-transform: uppercase;
+            cursor: pointer;
+            user-select: none;
         }
 
         .header-title h1 strong {
@@ -444,6 +446,67 @@ const char dashboard_html[] = R"rawliteral(<!DOCTYPE html>
             50% { transform: scale(1.02); }
             100% { transform: scale(1); }
         }
+
+        /* MODAL */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .modal-content {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+        .modal-header h2 { margin: 0; color: var(--accent-orange); }
+        .close-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            width: auto;
+        }
+        .close-btn:hover { color: #fff; }
+        
+        .diag-data-box {
+            background: #070913;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.85rem;
+            color: #a7f3d0;
+            white-space: pre-wrap;
+            min-height: 120px;
+            margin-top: 1rem;
+        }
     </style>
 </head>
 <body>
@@ -560,6 +623,30 @@ const char dashboard_html[] = R"rawliteral(<!DOCTYPE html>
 
     </div>
 
+    <!-- ADMIN DIAGNOSTICS MODAL -->
+    <div class="modal-overlay" id="diagModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Administrátorská Diagnostika</h2>
+                <button class="close-btn" onclick="closeDiagModal()">&times;</button>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0;">Vyberte modul pro čtení detailních dat ze senzorů v reálném čase. V tomto okně je automaticky zapnut Developer mód.</p>
+            
+            <div class="btn-grid" style="grid-template-columns: repeat(3, 1fr);">
+                <button class="btn-outline btn-sm" onclick="sendCommand('D1', this)">1. Lebka</button>
+                <button class="btn-outline btn-sm" onclick="sendCommand('D2', this)">2. Světla</button>
+                <button class="btn-outline btn-sm" onclick="sendCommand('D3', this)">3. Tlačítka</button>
+                <button class="btn-outline btn-sm" onclick="sendCommand('D4', this)">4. Kola</button>
+                <button class="btn-outline btn-sm" onclick="sendCommand('D5', this)">5. Laser</button>
+                <button class="btn-outline btn-sm" onclick="sendCommand('D6', this)">6. Místnost 3</button>
+                <button class="btn-outline btn-sm" style="grid-column: 1 / -1; border-color: var(--accent-blue);" onclick="sendCommand('I', this)">Skener I2C sběrnice</button>
+            </div>
+            
+            <div class="diag-data-box" id="diagDataOutput">Čekám na data...</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; text-align: right;" id="diagLogOutput"></div>
+        </div>
+    </div>
+
     <script>
         const DEFAULT_IP = '192.168.0.100';
         let isConnected = false;
@@ -581,6 +668,44 @@ const char dashboard_html[] = R"rawliteral(<!DOCTYPE html>
         const btnLaserDetectOn = document.getElementById('btnLaserDetectOn');
         const btnLaserDetectOff = document.getElementById('btnLaserDetectOff');
         const laserDetectInfo = document.getElementById('laserDetectInfo');
+
+        // Modals & Diag
+        const diagModal = document.getElementById('diagModal');
+        const diagDataOutput = document.getElementById('diagDataOutput');
+        const diagLogOutput = document.getElementById('diagLogOutput');
+        const adminTrigger = document.querySelector('.header-title h1');
+        
+        let clickCount = 0;
+        let clickTimer = null;
+
+        adminTrigger.addEventListener('click', () => {
+            clickCount++;
+            if (clickCount >= 3) {
+                clickCount = 0;
+                clearTimeout(clickTimer);
+                openDiagModalWithPassword();
+            } else {
+                clearTimeout(clickTimer);
+                clickTimer = setTimeout(() => { clickCount = 0; }, 1000);
+            }
+        });
+
+        function openDiagModalWithPassword() {
+            const pwd = prompt("Zadejte administrátorské heslo:");
+            if (pwd === "admin") { // Jednoduché heslo pro operátory
+                diagModal.classList.add('active');
+                addLog("Otevřena administrátorská diagnostika.", "info");
+                sendCommand('X1'); // Zapnout Developer mód na Master ESP
+            } else if (pwd !== null) {
+                alert("Nesprávné heslo.");
+            }
+        }
+
+        function closeDiagModal() {
+            diagModal.classList.remove('active');
+            sendCommand('X0'); // Vypnout Developer mód
+            sendCommand('D0'); // Zrušit výběr diag modulu
+        }
 
         const MODE_NAMES = { 0: 'Herní', 1: 'ALARM laseru', 2: 'Dohráno', 3: 'Pracovní' };
         const isOn = (v) => v === 1 || v === true || v === '1';
@@ -715,6 +840,18 @@ const char dashboard_html[] = R"rawliteral(<!DOCTYPE html>
                     if (pillClosed) pillClosed.classList.add('active-closed');
                     if (pillOpen) pillOpen.classList.remove('active-open');
                 }
+            }
+
+            // Zpracování dat pro Diagnostické okno
+            if (data.diag_text !== undefined && diagDataOutput) {
+                if (data.diag_text.trim() === '') {
+                    diagDataOutput.textContent = 'Žádná data ze senzorů. Vyberte modul výše.';
+                } else {
+                    diagDataOutput.textContent = data.diag_text;
+                }
+            }
+            if (data.diag_log !== undefined && diagLogOutput) {
+                diagLogOutput.textContent = data.diag_log ? ('Poslední I2C log: ' + data.diag_log) : '';
             }
         }
 
