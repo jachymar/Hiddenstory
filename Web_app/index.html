@@ -335,6 +335,97 @@
             font-weight: 600;
         }
 
+        /* LOCK STATE CONTROL */
+        .lock-state-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.55rem 0.85rem;
+            margin-bottom: 0.85rem;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .lock-state-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+
+        .lock-state-label {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        .lock-state-value {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .lock-state-value.ok {
+            color: var(--status-green);
+        }
+
+        .lock-state-value.alarm {
+            color: var(--status-red);
+        }
+
+        .status-pill-group {
+            display: inline-flex;
+            background: rgba(15, 17, 26, 0.8);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 2px;
+            gap: 2px;
+        }
+
+        .status-pill-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 5px;
+            padding: 0.35rem 0.65rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            margin: 0;
+            width: auto;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            user-select: none;
+        }
+
+        .status-pill-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .status-pill-btn.active-closed {
+            background: rgba(16, 185, 129, 0.18);
+            border-color: rgba(16, 185, 129, 0.5);
+            color: #6ee7b7;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.2);
+        }
+
+        .status-pill-btn.active-open {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.5);
+            color: #fca5a5;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.25);
+        }
+
         .pulse-btn {
             animation: pulse-border 0.4s ease;
         }
@@ -369,8 +460,8 @@
             <!-- GAME MODES MODULE -->
             <div class="card">
                 <h2>Herní Režim</h2>
-                <button id="btnMode0" class="btn-outline" onclick="sendCommand('0', this)">Standardní Hra (0)</button>
-                <button id="btnMode3" class="btn-outline" onclick="sendCommand('3', this)">Pracovní Mód (3)</button>
+                <button id="btnMode0" class="btn-outline" onclick="sendCommand('0', this)">Standardní Hra</button>
+                <button id="btnMode3" class="btn-outline" onclick="sendCommand('3', this)">Pracovní Mód</button>
                 <div class="mode-info" id="modeInfo">Aktuální režim: neznámý</div>
             </div>
 
@@ -387,15 +478,29 @@
             <!-- LOCKS MODULE -->
             <div class="card">
                 <h2>Manuální Ovládání Schránek</h2>
-                <div class="mode-info" id="lockStatusInfo">Stav Tlačítkové schránky: ČEKÁM NA DATA...</div>
+
+                <!-- Sledovaný stav Tlačítkové schránky s možností změny hodnoty -->
+                <div class="lock-state-row">
+                    <div class="lock-state-info">
+                        <span class="lock-state-label">Stav Tlačítkové schránky:</span>
+                        <div class="lock-state-value ok" id="lockStatusValue">
+                            <span class="dot" style="display:inline-block; width:7px; height:7px; border-radius:50%; background:currentColor;"></span>
+                            <span id="lockStatusText">ČEKÁM NA DATA...</span>
+                        </div>
+                    </div>
+                    <div class="status-pill-group">
+                        <button type="button" id="pillLockClosed" class="status-pill-btn" onclick="sendCommand('U', this)" title="Změnit sledovaný stav na: Zavřeno / Odblokovat">Zavřeno</button>
+                        <button type="button" id="pillLockOpen" class="status-pill-btn" onclick="sendCommand('B', this)" title="Změnit sledovaný stav na: Otevřeno / Blokovat">Otevřeno</button>
+                    </div>
+                </div>
+
                 <div class="btn-grid">
-                    <button class="btn-warning" onclick="sendCommand('A', this)">Lebka (A)</button>
-                    <button class="btn-warning" onclick="sendCommand('B', this)">Tlačítka (B)</button>
-                    <button class="btn-warning" onclick="sendCommand('C', this)">Kola (C)</button>
-                    <button class="btn-warning" onclick="sendCommand('E', this)">Oltář / Ťukání (E)</button>
-                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('F', this)">Vynucené vysypání kuličky (F)</button>
-                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('L', this)">Spustit světelnou kaskádu (L)</button>
-                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('U', this)">Odblokovat schránku Tlačítka (U)</button>
+                    <button class="btn-warning" onclick="sendCommand('A', this)">Lebka</button>
+                    <button class="btn-warning" onclick="sendCommand('B', this)">Tlačítka</button>
+                    <button class="btn-warning" onclick="sendCommand('C', this)">Kola</button>
+                    <button class="btn-warning" onclick="sendCommand('E', this)">Oltář / Ťukání</button>
+                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('F', this)">Vynucené vysypání kuličky</button>
+                    <button class="btn-warning" style="grid-column: 1 / -1;" onclick="sendCommand('L', this)">Spustit světelnou kaskádu</button>
                 </div>
             </div>
 
@@ -467,7 +572,7 @@
         const btnLaserDetectOff = document.getElementById('btnLaserDetectOff');
         const laserDetectInfo = document.getElementById('laserDetectInfo');
 
-        const MODE_NAMES = { 0: 'Herní (0)', 1: 'ALARM laseru (1)', 2: 'Dohráno (2)', 3: 'Pracovní (3)' };
+        const MODE_NAMES = { 0: 'Herní', 1: 'ALARM laseru', 2: 'Dohráno', 3: 'Pracovní' };
         const isOn = (v) => v === 1 || v === true || v === '1';
 
         function addLog(msg, type = 'info') {
@@ -575,16 +680,30 @@
             setBadgeStatus('mod-wled2', isOn(o.wled2));
             setBadgeStatus('mod-wled3', isOn(o.wled3));
 
-            // Aktualizace stavu Tlačítkové schránky (zda neblokuje kuličku a světla)
-            const lockStatusInfo = document.getElementById('lockStatusInfo');
-            if (lockStatusInfo && data.tlacitka) {
+            // Aktualizace sledovaného stavu Tlačítkové schránky
+            const lockStatusValue = document.getElementById('lockStatusValue');
+            const lockStatusText = document.getElementById('lockStatusText');
+            const pillClosed = document.getElementById('pillLockClosed');
+            const pillOpen = document.getElementById('pillLockOpen');
+
+            if (data.tlacitka) {
                 const isLocked = isOn(data.tlacitka.lock);
                 if (isLocked) {
-                    lockStatusInfo.textContent = 'Tlačítková schránka: OTEVŘENA (Blokuje kuličku a světla)';
-                    lockStatusInfo.classList.add('alarm');
+                    if (lockStatusText) lockStatusText.textContent = 'OTEVŘENA (blokuje)';
+                    if (lockStatusValue) {
+                        lockStatusValue.classList.remove('ok');
+                        lockStatusValue.classList.add('alarm');
+                    }
+                    if (pillOpen) pillOpen.classList.add('active-open');
+                    if (pillClosed) pillClosed.classList.remove('active-closed');
                 } else {
-                    lockStatusInfo.textContent = 'Tlačítková schránka: ZAVŘENA';
-                    lockStatusInfo.classList.remove('alarm');
+                    if (lockStatusText) lockStatusText.textContent = 'ZAVŘENA';
+                    if (lockStatusValue) {
+                        lockStatusValue.classList.remove('alarm');
+                        lockStatusValue.classList.add('ok');
+                    }
+                    if (pillClosed) pillClosed.classList.add('active-closed');
+                    if (pillOpen) pillOpen.classList.remove('active-open');
                 }
             }
         }
