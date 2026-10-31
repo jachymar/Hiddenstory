@@ -31,7 +31,7 @@ and build steps; this file carries conventions, decisions, current status and th
 - Tlačítka status pulses 4/5 are handled in every mode except 3; they last 1 s and were lost
   during the 17 s laser alarm.
 - Master prints `TELEMETRY:{json}` on USB on change and every 2 s (Web Serial dashboard).
-- Developer diagnostics (`X1`, `D<n>`, `I`) stay in firmware; no dashboard UI for them.
+- Developer diagnostics (`X1`, `D<n>`, `I`) stay in firmware; v aplikaci je nyní přidáno UI schované za heslem přes 3 kliknutí na nadpis "Hidden Story Operator".
 - Laser ignore switch `Y`/`Z` (added by the user 2026-10-11).
 - WLED gateway pings one strip per 3.3 s with a 150 ms connect timeout and handles WiFi loss.
 - Room 3 queues ESP-NOW messages and does I2C only in `loop()`.

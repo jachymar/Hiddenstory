@@ -1167,61 +1167,61 @@
         switch (activeDiagModule) {
           case 1: 
             if (readI2CDiagnostics(ADDR_LEBKA, dataLebka)) {
-              diagText = "--- LEBKA (I2C: 15) ---\nStav automatu: " + String(dataLebka.status) +
-                        "\nKrystaly (Maska): " + String(dataLebka.crystals_mask) +
-                        "\nAnalog K1: " + String(dataLebka.k1_val) +
-                        "\nAnalog K2: " + String(dataLebka.k2_val) +
-                        "\nAnalog K3: " + String(dataLebka.k3_val) +
-                        "\nZamek Otevren: " + String(dataLebka.lock_open ? "ANO" : "NE");
+              diagText = "--- LEBKA (I2C: 15) ---\nStav automatu (0=Ceka, 1=Bezi, 2=Hotovo): " + String(dataLebka.status) +
+                        "\nKrystaly (Maska: 1=K1, 2=K2, 4=K3, 7=Vse): " + String(dataLebka.crystals_mask) +
+                        "\nSenzor K1 (hodnota jasu): " + String(dataLebka.k1_val) +
+                        "\nSenzor K2 (hodnota jasu): " + String(dataLebka.k2_val) +
+                        "\nSenzor K3 (hodnota jasu): " + String(dataLebka.k3_val) +
+                        "\nStav zamku Lebky: " + String(dataLebka.lock_open ? "OTEVREN" : "ZAVREN");
               diagLogMsg = readI2CLog(ADDR_LEBKA);
             } else { diagText = "Chyba I2C komunikace s Lebkou!"; }
             break;
           case 2:
             if (readI2CDiagnostics(ADDR_SVETLA, dataSvetla)) {
-              diagText = "--- SVETLA (I2C: 14) ---\nStav I2C: " + String(dataSvetla.status) +
-                        "\nCyklus bezi: " + String(dataSvetla.mode_running ? "ANO" : "NE") +
-                        "\nAktualni LED faze: " + String(dataSvetla.current_led) +
-                        "\nMagnet prumer (klid): " + String(dataSvetla.magnet_idle) +
-                        "\nMagnet aktualne: " + String(dataSvetla.magnet_val);
+              diagText = "--- SVETLA (I2C: 14) ---\nStav I2C automatu: " + String(dataSvetla.status) +
+                        "\nSvetelny cyklus bezi: " + String(dataSvetla.mode_running ? "ANO" : "NE") +
+                        "\nAktualni rozsvicena LED faze: " + String(dataSvetla.current_led) +
+                        "\nMagnet senzor - Prumer v klidu (kalibrace): " + String(dataSvetla.magnet_idle) +
+                        "\nMagnet senzor - Aktualni cteni: " + String(dataSvetla.magnet_val);
               diagLogMsg = readI2CLog(ADDR_SVETLA);
             } else { diagText = "Chyba I2C komunikace se Svetly!"; }
             break;
           case 3:
             if (readI2CDiagnostics(ADDR_TLACITKA, dataTlacitka)) {
-              diagText = "--- TLACITKA (I2C: 11) ---\nStav hesla: " + String(dataTlacitka.status) +
-                        "\nStisky: " + String(dataTlacitka.presses) + "/4" +
-                        "\nCas v klidu: " + String(dataTlacitka.idle_time) + " ms" +
-                        "\nZamek Otevren: " + String(dataTlacitka.lock_open ? "ANO" : "NE");
+              diagText = "--- TLACITKA (I2C: 11) ---\nStav zadavani hesla: " + String(dataTlacitka.status) +
+                        "\nPocet spravnych stisku v rade: " + String(dataTlacitka.presses) + "/4" +
+                        "\nCas od posledniho stisku (ms): " + String(dataTlacitka.idle_time) +
+                        "\nStav zamku Tlacitek: " + String(dataTlacitka.lock_open ? "OTEVREN" : "ZAVREN");
               diagLogMsg = readI2CLog(ADDR_TLACITKA);
             } else { diagText = "Chyba I2C komunikace s Tlacitky!"; }
             break;
           case 4:
             if (readI2CDiagnostics(ADDR_KOLA, dataKola)) {
-              diagText = "--- KOLA (I2C: 12) ---\nStav I2C: " + String(dataKola.status) +
-                        "\nAktivni magnety (Maska): " + String(dataKola.active_mask) +
-                        "\nAnalog 1: " + String(dataKola.a1_val) +
-                        "\nAnalog 2: " + String(dataKola.a2_val) +
-                        "\nAnalog 3: " + String(dataKola.a3_val);
+              diagText = "--- KOLA (I2C: 12) ---\nStav I2C automatu: " + String(dataKola.status) +
+                        "\nAktivni senzory magnetu (Maska: 1=A1, 2=A2, 4=A3, 7=Vse): " + String(dataKola.active_mask) +
+                        "\nSenzor A1 (hodnota pole): " + String(dataKola.a1_val) +
+                        "\nSenzor A2 (hodnota pole): " + String(dataKola.a2_val) +
+                        "\nSenzor A3 (hodnota pole): " + String(dataKola.a3_val);
               diagLogMsg = readI2CLog(ADDR_KOLA);
             } else { diagText = "Chyba I2C komunikace s Koly!"; }
             break;
           case 5:
             if (readI2CDiagnostics(ADDR_LASER, dataLaser)) {
               diagText = "--- LASER (I2C: 13) ---\nStav I2C (0=OK, 1=Alarm): " + String(dataLaser.status) +
-                        "\nLaser Zapnut: " + String(dataLaser.laser_on ? "ANO" : "NE") +
-                        "\nLDR Senzor: " + String(dataLaser.ldr_val) +
-                        "\nPocet chyb trefeni: " + String(dataLaser.fails);
+                        "\nLaser zapnut (fyzicky sviti): " + String(dataLaser.laser_on ? "ANO" : "NE") +
+                        "\nLDR Senzor (hodnota na fotorezistoru): " + String(dataLaser.ldr_val) +
+                        "\nPocet poplachu (preruseni paprsku): " + String(dataLaser.fails);
               diagLogMsg = readI2CLog(ADDR_LASER);
             } else { diagText = "Chyba I2C komunikace s Laserem!"; }
             break;
           case 6:
             posliPrikazM3(0, 'R'); // 'R' = vyžádání diagnostiky z Místnosti 3
-            diagText = "--- MISTNOST 3 (ESP-NOW) ---\n(Odeslan dotaz, data chodi asynchronne)\n\nTukani stav: " + String(m3_data.tukani_status) +
-                      "\nTukani poklepy: " + String(m3_data.tukani_taps) +
-                      "\nTukani zamek: " + String(m3_data.tukani_lock ? "OTEVREN" : "ZAVREN") +
+            diagText = "--- MISTNOST 3 (ESP-NOW) ---\n(Odeslan dotaz, data chodi asynchronne)\n\nTukani (Oltar) stav: " + String(m3_data.tukani_status) +
+                      "\nPocet spravnych poklepu (z 3): " + String(m3_data.tukani_taps) +
+                      "\nZamek Tukani (Oltar): " + String(m3_data.tukani_lock ? "OTEVREN" : "ZAVREN") +
                       "\n\nAudio3 stav: " + String(m3_data.audio3_status) +
-                      "\nAudio3 hraje: " + String(m3_data.audio3_is_playing ? "ANO" : "NE") +
-                      "\nAudio3 alarm: " + String(m3_data.audio3_is_alarm ? "ANO" : "NE");
+                      "\nAudio3 aktualne prehrava: " + String(m3_data.audio3_is_playing ? "ANO" : "NE") +
+                      "\nAudio3 alarm rezim: " + String(m3_data.audio3_is_alarm ? "ANO" : "NE");
             diagLogMsg = "Tuk: " + String(m3_data.tukani_log) + " | Aud: " + String(m3_data.audio3_log);
             break;
           case 99:
