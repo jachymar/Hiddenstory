@@ -433,6 +433,9 @@ void receiveEvent(int howMany) {
       Log("I2C: Prikaz L (Svetelna kaskada)");
     } else if (c == 'U') {
       schrankaOtevrena = false;
+      vypniVsechnaSvetla();
+      pripravenoKActivaci = true;
+      casVstupuDoOkna = millis();
       Log("I2C: Prikaz U (Odblokovani schranky)");
     } else if (c == 'O' || c == 'B') {
       // Schránka otevřena tlačítky nebo webem -> okamžitě zastavit světla a zablokovat další spouštění

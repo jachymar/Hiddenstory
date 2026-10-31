@@ -4,7 +4,7 @@
 #define SLAVE_ADDR 11 // Adresa prvního Arduina
 
 /* --- KONFIGURACE PINŮ A HESLA --- */
-const int tlacitka[] = {2, 3, 4, 5, 6}; //Heslo: 1,4,2,3 (Tlačítka 1-4) | Tlačítko 5 je opakovatelné
+const int tlacitka[] = {2, 3, 4, 5, 6}; // Heslo: 1,4,2,3 | Poslední 4 stisky jsou vyhodnocovány kontinuálně
 const int pinServoZamek = 9;   
 const int heslo[] = {1, 4, 2, 3}; 
 
@@ -27,6 +27,7 @@ void Log(const char* txt) {
 int zadaneHeslo[4] = {0, 0, 0, 0};
 int pocetZadanych = 0;
 int pocetChybek = 0;
+int pocetChybnychStisku = 0;
 int pocitadloStisku = 0;
 const unsigned long CAS_PRO_UVOLNENI = 250; // 250 ms debounce
 
@@ -102,33 +103,30 @@ void loop() {
     servoZamek.write(0);
     zamekVakci = false;
     schrankaOtevrena = false;
+    pocetChybek = 0;
+    pocetChybnychStisku = 0;
+    pocetZadanych = 0;
+    for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
     i2cStatus = 0;
   }
 
   // Aktualizace telemetrie pro ESP32
   myTelemetry.status = i2cStatus;
-  myTelemetry.lock_open = zamekVakci ? 1 : 0;
+  myTelemetry.lock_open = schrankaOtevrena ? 1 : 0;
   myTelemetry.presses = (uint8_t)pocitadloStisku;
   unsigned long idle = ted - posledniAktivitaHesla;
   myTelemetry.idle_time = (idle > 65535) ? 65535 : (uint16_t)idle;
 }
 
-bool uzZadano(int btnId) {
-  for (int j = 0; j < pocetZadanych; j++) {
-    if (zadaneHeslo[j] == btnId) return true;
-  }
-  return false;
-}
-
 void handleButtons(unsigned long ted) {
-  // Během zadávání hesla neaktivita nerozbije rozpracovanou sekvenci.
-  // Po 30 sekundách bez aktivity lze spustit akci jen tehdy, když není pokus rozpracovaný.
-  if (!schrankaOtevrena && odpocetNeaktivityAktivni && pocetZadanych == 0 &&
+  // Po 30 sekundách bez aktivity se spustí chybová akce (vysypání kuličky servom na Světlech)
+  if (!schrankaOtevrena && odpocetNeaktivityAktivni &&
       (ted - posledniAktivitaHesla >= 30000)) {
     i2cStatus = 4; // Signalizace chyby / neaktivity pro Mastera (vysypání kuličky servom)
     casZmenyI2C = ted;
     odpocetNeaktivityAktivni = false;
     pocetChybek = 0;
+    pocetChybnychStisku = 0;
     pocetZadanych = 0;
     for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
     Log("30s neaktivita: Servo (chyba)");
@@ -152,24 +150,25 @@ void handleButtons(unsigned long ted) {
         
         int btnId = i + 1; // Převod na "Tlačítko 1 až 5", bez ohledu na to, jaký je to fyzický pin
 
-        // Tlačítko 5 (pin 6) lze mačkat opakovaně libovolněkrát.
-        // Ostatní tlačítka (1 až 4) se v rámci jednoho 4-místného pokusu smí zadat pouze jednou.
-        bool muzePridat = true;
-        if (btnId != 5 && uzZadano(btnId)) {
-          muzePridat = false;
-        }
-
-        if (muzePridat) {
+        if (!schrankaOtevrena) {
+          // Kontinuální buffer: posuneme historii doleva a nový stisk přidáme na konec
           if (pocetZadanych < 4) {
             zadaneHeslo[pocetZadanych] = btnId;
             pocetZadanych++;
+          } else {
+            for (int j = 0; j < 3; j++) {
+              zadaneHeslo[j] = zadaneHeslo[j + 1];
+            }
+            zadaneHeslo[3] = btnId;
           }
+
+          pocetChybnychStisku++;
 
           char msg[25];
           sprintf(msg, "Stisk: T%d (%d/4)", btnId, pocetZadanych);
           Log(msg);
 
-          // Kontrola hesla po 4 stiscích
+          // Kontrola hesla: jako zadané heslo jsou vždy považována poslední 4 ťuknutí
           if (pocetZadanych == 4) {
             bool ok = true;
             for (int j = 0; j < 4; j++) {
@@ -180,29 +179,31 @@ void handleButtons(unsigned long ted) {
               Log(">>> HESLO SPRAVNE <<<");
               otevriZamek(ted);
               pocetChybek = 0;
+              pocetChybnychStisku = 0;
               i2cStatus = 5; 
               casZmenyI2C = ted;
               odpocetNeaktivityAktivni = false;
+              
+              // Vyčistíme historii pro další hru
+              pocetZadanych = 0;
+              for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
             } else {
-              Log(">>> HESLO SPATNE <<<");
-              pocetChybek++;
-              if (pocetChybek >= 3) {
-                Log(">>> 3x SPATNE (12 stisku) <<<");
-                pocetChybek = 0;
-                i2cStatus = 4; // Signalizace chyby pro Mastera (pohyb serva na Světlech)
-                casZmenyI2C = ted;
-                odpocetNeaktivityAktivni = false;
+              if (pocetChybnychStisku >= 4) {
+                pocetChybnychStisku = 0;
+                pocetChybek++;
+                Log(">>> HESLO SPATNE <<<");
+                if (pocetChybek >= 3) {
+                  Log(">>> 3x SPATNE (12 stisku) <<<");
+                  pocetChybek = 0;
+                  i2cStatus = 4; // Signalizace chyby pro Mastera (pohyb serva na Světlech)
+                  casZmenyI2C = ted;
+                  odpocetNeaktivityAktivni = false;
+                  pocetZadanych = 0;
+                  for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
+                }
               }
             }
-            
-            // Vyčistíme historii pro další pokus
-            pocetZadanych = 0;
-            for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
           }
-        } else {
-          char msg[25];
-          sprintf(msg, "Ignor: T%d (jiz zadano)", btnId);
-          Log(msg);
         }
       }
     }
@@ -222,11 +223,29 @@ void receiveEvent(int howMany) {
       odpocetNeaktivityAktivni = true;
       posledniAktivitaHesla = millis();
       Log("I2C: Magnet aktivovan - start 30s");
+    } else if (c == 'O') {
+      // Pouze nastavení stavu na Otevřeno (blokovat zadávání hesel bez pohybu serva)
+      schrankaOtevrena = true;
+      odpocetNeaktivityAktivni = false;
+      pocetZadanych = 0;
+      for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
+      Log("I2C: Schranka nastavena: Otevreno (blokovat)");
+    } else if (c == 'U') {
+      // Odblokování schránky (stav Zavřeno) pro novou hru i během herního módu
+      schrankaOtevrena = false;
+      odpocetNeaktivityAktivni = false;
+      pocetChybek = 0;
+      pocetChybnychStisku = 0;
+      pocetZadanych = 0;
+      posledniAktivitaHesla = millis();
+      for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
+      Log("I2C: Schranka nastavena: Zavreno (odblokovano)");
     } else if (c == '3') {
       // Pouze pracovní mód ('3') odblokuje schránku pro další hru
       schrankaOtevrena = false;
       odpocetNeaktivityAktivni = false;
       pocetChybek = 0;
+      pocetChybnychStisku = 0;
       pocetZadanych = 0;
       posledniAktivitaHesla = millis();
       for (int k = 0; k < 4; k++) zadaneHeslo[k] = 0;
@@ -234,6 +253,7 @@ void receiveEvent(int howMany) {
     } else if (c == '0' || c == 'R' || c == 99) {
       // Běžný návrat/reset (např. z laser alarmu)
       pocetChybek = 0;
+      pocetChybnychStisku = 0;
       pocetZadanych = 0;
       odpocetNeaktivityAktivni = false;
       posledniAktivitaHesla = millis();

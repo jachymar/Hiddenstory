@@ -1,7 +1,7 @@
 // ============================================================================
 //  GENEROVANY SOUBOR - NEEDITOVAT RUCNE!
 //  Zdroj:     Web_app/index.html
-//  Generator: python snippet
+//  Generator: Web_app/build_dashboard.ps1   (spust po kazde zmene index.html)
 //  Kodovani:  UTF-8 bez BOM (ESP stranku serviruje s charset=utf-8)
 // ============================================================================
 #pragma once
@@ -562,7 +562,7 @@ const char dashboard_html[] = R"rawliteral(<!DOCTYPE html>
                     </div>
                     <div class="status-pill-group">
                         <button type="button" id="pillLockClosed" class="status-pill-btn" onclick="sendCommand('U', this)" title="Změnit sledovaný stav na: Zavřeno / Odblokovat">Zavřeno</button>
-                        <button type="button" id="pillLockOpen" class="status-pill-btn" onclick="sendCommand('B', this)" title="Změnit sledovaný stav na: Otevřeno / Blokovat">Otevřeno</button>
+                        <button type="button" id="pillLockOpen" class="status-pill-btn" onclick="sendCommand('O', this)" title="Změnit sledovaný stav na: Otevřeno / Blokovat">Otevřeno</button>
                     </div>
                 </div>
 

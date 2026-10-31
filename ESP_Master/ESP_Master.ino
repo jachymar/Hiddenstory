@@ -200,6 +200,7 @@
     bool laserAktivovanDvermi = false;
     uint8_t minulyStavDveri1 = 255;
     bool laserIgnored = false; // Ignorování přerušení laseru v herním módu
+    bool schrankaTlacitkaOtevrena = false; // Logický stav otevření/blokování schránky tlačítek a světel
 
     void updateLCD() {
       unsigned long ted = millis();
@@ -526,6 +527,8 @@
       posliPrikazI2C(ADDR_KOLA, (mode == 3) ? '3' : '0');
 
       if (mode == 3) {
+        schrankaTlacitkaOtevrena = false;
+        dataTlacitka.lock_open = 0;
         posliPrikazI2C(ADDR_SVETLA, 'E');   // Vysypání kuličky při přechodu do pracovního módu
         posliPrikazI2C(ADDR_SVETLA, '3');   // Reset stavu světel pro pracovní mód
         posliPrikazI2C(ADDR_TLACITKA, '3'); // Reset tlačítek pro novou hru / pracovní mód
@@ -536,6 +539,8 @@
       } else if (mode == 0) {
         posliPrikazI2C(ADDR_SVETLA, 'R');   // Reset pro novou hru
         if (predchoziMod == 3) {
+          schrankaTlacitkaOtevrena = false;
+          dataTlacitka.lock_open = 0;
           posliPrikazI2C(ADDR_TLACITKA, '3'); // Reset stavu schránky po pracovním módu
           delay(10);
         }
@@ -578,7 +583,7 @@
       json += "\"mode\":" + String(lastGameMode) + ",";
       json += "\"lebka\":{\"st\":" + String(dataLebka.status) + ",\"c_mask\":" + String(dataLebka.crystals_mask) + ",\"k1\":" + String(dataLebka.k1_val) + ",\"k2\":" + String(dataLebka.k2_val) + ",\"k3\":" + String(dataLebka.k3_val) + ",\"lock\":" + String(dataLebka.lock_open) + "},";
       json += "\"svetla\":{\"st\":" + String(dataSvetla.status) + ",\"run\":" + String(dataSvetla.mode_running) + ",\"led\":" + String(dataSvetla.current_led) + ",\"m_idl\":" + String(dataSvetla.magnet_idle) + ",\"m_val\":" + String(dataSvetla.magnet_val) + "},";
-      json += "\"tlacitka\":{\"st\":" + String(dataTlacitka.status) + ",\"lock\":" + String(dataTlacitka.lock_open) + ",\"prs\":" + String(dataTlacitka.presses) + ",\"idl\":" + String(dataTlacitka.idle_time) + "},";
+      json += "\"tlacitka\":{\"st\":" + String(dataTlacitka.status) + ",\"lock\":" + String(schrankaTlacitkaOtevrena ? "1" : "0") + ",\"prs\":" + String(dataTlacitka.presses) + ",\"idl\":" + String(dataTlacitka.idle_time) + "},";
       json += "\"kola\":{\"st\":" + String(dataKola.status) + ",\"mask\":" + String(dataKola.active_mask) + ",\"a1\":" + String(dataKola.a1_val) + ",\"a2\":" + String(dataKola.a2_val) + ",\"a3\":" + String(dataKola.a3_val) + "},";
       json += "\"laser\":{\"st\":" + String(dataLaser.status) + ",\"on\":" + String(dataLaser.laser_on) + ",\"ldr\":" + String(dataLaser.ldr_val) + ",\"fail\":" + String(dataLaser.fails) + ",\"ign\":" + String(laserIgnored ? "1" : "0") + "},";
       json += "\"m3_tukani\":{\"st\":" + String(m3_data.tukani_status) + ",\"lock\":" + String(m3_data.tukani_lock) + ",\"taps\":" + String(m3_data.tukani_taps) + "},";
@@ -669,8 +674,19 @@
           break;
         case 'B':
           Serial.println("Web zada otevreni schranky: Tlacitka (B)");
+          schrankaTlacitkaOtevrena = true;
+          dataTlacitka.lock_open = 1;
           posliPrikazI2C(ADDR_TLACITKA, 'B');
           posliPrikazI2C(ADDR_SVETLA, 'O');
+          posliTelemetryState(millis());
+          break;
+        case 'O':
+          Serial.println("Web zada nastaveni stavu schranky: Otevreno / Blokovat (O)");
+          schrankaTlacitkaOtevrena = true;
+          dataTlacitka.lock_open = 1;
+          posliPrikazI2C(ADDR_SVETLA, 'O');
+          posliPrikazI2C(ADDR_TLACITKA, 'O');
+          posliTelemetryState(millis());
           break;
         case 'C':
           Serial.println("Web zada otevreni schranky: Kola (C)");
@@ -693,9 +709,12 @@
           posliPrikazI2C(ADDR_SVETLA, 'L');
           break;
         case 'U':
-          Serial.println("Web zada odblokovani schranky a reset tlacitek (U) -> Svetla 'U', Tlacitka 'R'");
+          Serial.println("Web zada odblokovani schranky a reset tlacitek (U) -> Svetla 'U', Tlacitka 'U'");
+          schrankaTlacitkaOtevrena = false;
+          dataTlacitka.lock_open = 0;
           posliPrikazI2C(ADDR_SVETLA, 'U');
-          posliPrikazI2C(ADDR_TLACITKA, 'R');
+          posliPrikazI2C(ADDR_TLACITKA, 'U');
+          posliTelemetryState(millis());
           break;
         case 'X': {
           // Developer Mód (X1 / X0)
@@ -1097,9 +1116,12 @@
             } else if (prectenoTlacitka == 5) {
               // Schránka otevřena tlačítky -> zastavit kaskádu a zablokovat její další spouštění
               if (!otevrenoOdeslano) {
+                schrankaTlacitkaOtevrena = true;
+                dataTlacitka.lock_open = 1;
                 posliPrikazI2C(ADDR_SVETLA, 'O');
                 Serial.println("Odesilan prikaz O (Schranka otevrena) na Svetla.");
                 otevrenoOdeslano = true;
+                posliTelemetryState(millis());
               }
             } else {
               chybaOdeslana = false;
@@ -1188,6 +1210,7 @@
             break;
           case 3:
             if (readI2CDiagnostics(ADDR_TLACITKA, dataTlacitka)) {
+              schrankaTlacitkaOtevrena = (dataTlacitka.lock_open != 0);
               diagText = "--- TLACITKA (I2C: 11) ---\nStav zadavani hesla: " + String(dataTlacitka.status) +
                         "\nPocet spravnych stisku v rade: " + String(dataTlacitka.presses) + "/4" +
                         "\nCas od posledniho stisku (ms): " + String(dataTlacitka.idle_time) +
