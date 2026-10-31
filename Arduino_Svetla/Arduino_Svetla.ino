@@ -20,7 +20,7 @@ const unsigned long ochrannaLhuta = 800;          // 0,8s (800ms) v klidu pro re
 
 /* --- AUTO-KALIBRACE MAGNETU --- */
 int klidovaHodnota = 0;
-const int deltaThreshold = 10; // O kolik se musí hodnota změnit pro aktivaci (citlivost)
+const int deltaThreshold = 6; // O kolik se musí hodnota změnit pro aktivaci (citlivost)
 
 // Proměnné pro 2 minutový průměr
 const int velikostBufferu = 120; // 120 vteřin = 2 minuty
@@ -63,6 +63,7 @@ const unsigned long DOBA_POTVRZENI_MAGNETU = 300; // Senzor musí být aktivní 
 
 // Proměnné pro servo a chybovou sekvenci
 volatile bool chybovaSekvenceAktivni = false;
+volatile bool vynuceneVysypani = false;
 unsigned long casZacatkuChyby = 0;
 bool servoVPohybu = false;
 
@@ -361,7 +362,7 @@ void loop() {
 
   // --- 6. LOGIKA SERVA (Chybová sekvence hesel z tlačítek a pracovní mód) ---
   if (chybovaSekvenceAktivni) {
-    if (schrankaOtevrena && !pracovniMod) {
+    if (schrankaOtevrena && !pracovniMod && !vynuceneVysypani) {
       chybovaSekvenceAktivni = false;
       servoVPohybu = false;
     } else {
@@ -374,6 +375,7 @@ void loop() {
         cilovyUhelServa = 0;
         chybovaSekvenceAktivni = false;
         servoVPohybu = false;
+        vynuceneVysypani = false;
         Log("Servo: 0 deg");
       }
     }
@@ -420,6 +422,18 @@ void receiveEvent(int howMany) {
       servoVPohybu = false;
       casZacatkuChyby = 0;
       Log("I2C: Prikaz E (Vysypani kulicky servom)");
+    } else if (c == 'F') {
+      chybovaSekvenceAktivni = true;
+      vynuceneVysypani = true;
+      servoVPohybu = false;
+      casZacatkuChyby = 0;
+      Log("I2C: Prikaz F (Vynucene vysypani)");
+    } else if (c == 'L') {
+      spustSekvenci(millis());
+      Log("I2C: Prikaz L (Svetelna kaskada)");
+    } else if (c == 'U') {
+      schrankaOtevrena = false;
+      Log("I2C: Prikaz U (Odblokovani schranky)");
     } else if (c == 'O' || c == 'B') {
       // Schránka otevřena tlačítky nebo webem -> okamžitě zastavit světla a zablokovat další spouštění
       schrankaOtevrena = true;

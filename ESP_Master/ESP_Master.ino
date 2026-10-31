@@ -636,6 +636,7 @@
     //   0-3  změna herního módu            A  otevřít schránku Lebka
     //   B    otevřít schránku Tlačítka      C  otevřít schránku Kola
     //   E    otevřít zámek Ťukání (M3)      F  vysypat magnetickou kuličku (servo na Světlech)
+    //   R    aktivace audio rytmu (M3)      L  spustit světelnou kaskádu
     //   Xn   Developer mód 1/0              Dn vybrat modul pro diagnostiku (D0 = žádný)
     //   I    I2C skener
     void processCommand(String msg) {
@@ -679,10 +680,22 @@
           Serial.println("Web zada otevreni zamku: Tukani / Oltar (E)");
           posliPrikazM3(20, 'O');
           break;
+        case 'R':
+          Serial.println("Web zada aktivaci audio rytmu M3 (Audio 3 'A')");
+          posliPrikazM3(21, 'A');
+          break;
         case 'F':
-          // Dříve bez obsluhy - tlačítko na webu nedělalo nic
-          Serial.println("Web zada vysypani magneticke kulicky (F) -> Svetla 'E'");
-          posliPrikazI2C(ADDR_SVETLA, 'E');
+          Serial.println("Web zada vynucene vysypani magneticke kulicky (F) -> Svetla 'F'");
+          posliPrikazI2C(ADDR_SVETLA, 'F');
+          break;
+        case 'L':
+          Serial.println("Web zada spusteni svetelne kaskady (L) -> Svetla 'L'");
+          posliPrikazI2C(ADDR_SVETLA, 'L');
+          break;
+        case 'U':
+          Serial.println("Web zada odblokovani schranky a reset tlacitek (U) -> Svetla 'U', Tlacitka 'R'");
+          posliPrikazI2C(ADDR_SVETLA, 'U');
+          posliPrikazI2C(ADDR_TLACITKA, 'R');
           break;
         case 'X': {
           // Developer Mód (X1 / X0)

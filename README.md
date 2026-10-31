@@ -80,7 +80,7 @@ returns the module's packed diag struct, `0x98` returns its 30-char last log lin
 | Lebka (via 13) | `A` open box, `S` status, `D` telemetry CSV, `L` log | 2 = all crystals present |
 | Audio 1/2 16 | `0` main loop, `1` ignored, `3` stop, `K` victory | 1 door open, 0 door closed |
 | Tukani 20 | `O` force open | 1 beep request, 2 solved |
-| Audio 3 21 | `0`/`3` mode, `A` alarm, `E` beep, `D` solved | |
+| Audio 3 21 | `0`/`3` mode, `A` alarm / play rhythm, `E` beep, `D` solved | |
 
 ### Master → WLED gateway (Serial2, one line per command)
 
@@ -98,7 +98,7 @@ Master → M3: `{target_i2c, command, sys_mode, sys_color, sys_crystals}`. `U` i
 |---|---|
 | `GET /` | Dashboard (served from `ESP_Master/dashboard_html.h`) |
 | `GET /api/state` | JSON: `mode`, per-module telemetry, `online{eth,laser,tlacitka,lebka,kola,svetla,audio,lcd,wled1-3,m3,m3_tukani,m3_audio3}`, `diag_text`, `diag_log` |
-| `POST /api/command` | Body is the command: `0`…`3` mode, `A` Lebka, `B` Tlačítka, `C` Kola, `E` Tukani lock, `F` dump the ball, `X1`/`X0` dev mode, `D<n>` diag module 1–6, `I` I2C scan |
+| `POST /api/command` | Body is the command: `0`…`3` mode, `A` Lebka, `B` Tlačítka, `C` Kola, `E` Tukani lock, `F` dump the ball, `R` play M3 rhythm, `X1`/`X0` dev mode, `D<n>` diag module 1–6, `I` I2C scan |
 
 USB (115200 baud) accepts the same commands plus `GET_STATE`. The master prints `TELEMETRY:{json}`
 on every change and at least every 2 s; the dashboard's "Připojit USB" button uses this via Web Serial.
