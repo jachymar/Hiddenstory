@@ -10,10 +10,9 @@ volatile byte i2cStatus = 0;
 volatile bool cmdStop = false;
 volatile bool cmdAlarm = false; 
 volatile bool cmdBeep = false;  
-volatile bool cmdSolved = false; // Příkaz pro vyřešené puzzle
-volatile bool cmdGameStarted = false;
-bool pracovniMod = false;
+volatile bool cmdSolved = false; // Prikaz pro vyreseni puzzle
 
+bool pracovniMod = false;
 char lastLog[30] = "Start";
 
 void Log(const char* txt) {
@@ -28,6 +27,7 @@ struct DiagAudio3 {
   uint8_t is_alarm_playing;
   uint8_t padding;
 } __attribute__((packed));
+
 DiagAudio3 myTelemetry = {0, 0, 0, 0};
 
 void requestEvent() {
@@ -52,7 +52,7 @@ void receiveEvent(int howMany) {
     }
     else if (c == '0') {
       pracovniMod = false;
-      cmdGameStarted = true;
+      lastTapTime = millis(); // Ochrana proti okamzitemu spusteni hintu po zapnuti hry
     }
     else if (c == 'A') {
       cmdAlarm = true; // Rytmus lze spustit i v pracovnim modu
@@ -66,61 +66,67 @@ void receiveEvent(int howMany) {
   }
 }
 
-// *** KONFIGURACE PINŮ PRO SHIELD ***
-#define VS1053_RESET    8     
-#define VS1053_CS       6     
-#define VS1053_DCS      7     
-#define VS1053_DREQ     2     
-#define CARD_CS         9     
+// *** KONFIGURACE PINU PRO SHIELD ***
+#define VS1053_RESET    8      
+#define VS1053_CS       6      
+#define VS1053_DCS      7      
+#define VS1053_DREQ     2      
+#define CARD_CS         9      
 
 // *** PINY PRO SENZORY ***
-#define PIN_DVERE       10    
-#define PIN_SIGNAL_EXT   5    
+#define PIN_DVERE       10     
+#define PIN_SIGNAL_EXT   5     
 
-// *** NASTAVENÍ ČASŮ ***
-const unsigned long PRODLEVA_DVERE  = 5000;  // 5 sekund pro dveře
-const unsigned long PRODLEVA_SIGNAL = 10000; // 10 sekund pro finální zvuk 0003
-const unsigned long CLICK_WINDOW     = 450;  // Okno pro rozpoznání dvojkliku (ms)
-const int HLASITOST_HLAVNI = 20;
+// *** NASTAVENI ***
+const unsigned long CLICK_WINDOW     = 450;  // Okno pro rozpoznani dvojkliku (ms)
+const int HLASITOST_HLAVNI = 20; 
 
 // *** SKLADBY ***
-const char* TRACK_FINAL = "/0003.mp3"; // Hlavní nezastavitelný alarm
+const char* TRACK_FINAL = "/0003.mp3"; // Hlavni nezastavitelny alarm / rytmus
 
 Adafruit_VS1053_FilePlayer filePlayer = 
   Adafruit_VS1053_FilePlayer(VS1053_RESET, VS1053_CS, VS1053_DCS, VS1053_DREQ, CARD_CS);
 
-// Proměnné pro Dveře (Pin 10) a Hint logiku
+// Promenne pro Dvere (Pin 10) a Hint logiku
 bool doorOpen = false;
 bool isPlayingHint = false;
 unsigned long solvedTime = 0;
-const unsigned long SOLVED_COOLDOWN_MS = 60000; // 1 minuta ticha po správném vyřešení
-const unsigned long GRACE_PERIOD_MS = 90000;    // 90 s ochrana po otevření dveří
-const unsigned long HINT_COOLDOWN_MS = 45000;   // 45 s pauza mezi nápovědami
+
+// Casovani
+const unsigned long SURPRISE_DELAY_MS = 3500;   // 3.5s prekvapeni po otevreni dveri
+const unsigned long SOLVED_COOLDOWN_MS = 60000; // 1 minuta ticha po spravnem vyreseni
+const unsigned long GRACE_PERIOD_MS = 90000;    // 90s ochrana pote, co dohraje prekvapeni
+const unsigned long HINT_COOLDOWN_MS = 45000;   // 45s pauza mezi napovedami
+
+bool surprisePending = false;
+unsigned long gracePeriodStartTime = 0;
+
 unsigned long doorOpenTime = 0;
 unsigned long lastTapTime = 0;
 unsigned long lastHintPlayedTime = 0;
 bool lastDoorState = LOW;
 
-// Nové příznaky pro nápovědu (jednorázové přehrání)
-bool hint8sPlayed = false;   // Příznak, že už proběhla nápověda po 8s neaktivitě
-bool hint60sPlayed = false;  // Příznak, že už proběhla nápověda po 60s ťukání
-unsigned long tapSessionStartTime = 0; // Začátek aktuální série ťukání
+bool hint8sPlayed = false;   
+bool hint30sPlayed = false;  
+unsigned long tapSessionStartTime = 0; 
 
-// Proměnné pro Signál (Pin 5) - ponecháno pro ruční stop
+// Promenne pro Signal (Pin 5) - rucni stop
 bool lastSignalState = HIGH;
 int clickCount = 0;
 unsigned long lastClickTime = 0;
 bool waitingForDecision = false;
 
-// Funkce pro úplné zastavení
+// Funkce pro totalni zastaveni
 void stopEverything() {
   waitingForDecision = false;
   clickCount = 0;
   isPlayingHint = false;
   hint8sPlayed = false;
-  hint60sPlayed = false;
+  hint30sPlayed = false;
   tapSessionStartTime = 0;
   lastHintPlayedTime = 0;
+  surprisePending = false;
+  gracePeriodStartTime = 0;
   if (filePlayer.playingMusic) {
     filePlayer.stopPlaying();
   }
@@ -131,17 +137,17 @@ void setup() {
   Serial.begin(115200);
   pinMode(PIN_DVERE, INPUT_PULLUP);
   pinMode(PIN_SIGNAL_EXT, INPUT_PULLUP);
-
+  
   if (!filePlayer.begin()) { while (1); }
   if (!SD.begin(CARD_CS)) { while (1); }
-
+  
   filePlayer.setVolume(HLASITOST_HLAVNI, HLASITOST_HLAVNI);
-
+  
   Wire.begin(I2C_SLAVE_ADDR);
   Wire.onRequest(requestEvent);
   Wire.onReceive(receiveEvent);
-
-  Serial.println(F("Audio 3 ready. Hint logic active."));
+  
+  Serial.println(F("Audio 3 ready. Surprise & Hint logic active."));
 }
 
 void loop() {
@@ -151,15 +157,10 @@ void loop() {
   myTelemetry.status = i2cStatus;
   myTelemetry.is_playing = filePlayer.playingMusic ? 1 : 0;
   myTelemetry.is_alarm_playing = isPlayingHint ? 1 : 0;
-  
-  if (cmdGameStarted) {
-    cmdGameStarted = false;
-    lastTapTime = now; // Ochrana proti okamžitému spuštění nápovědy po zapnutí hry
-  }
 
   if (cmdStop) {
     cmdStop = false;
-    stopEverything(); 
+    stopEverything();
   }
   
   if (cmdAlarm) {
@@ -168,14 +169,16 @@ void loop() {
     filePlayer.stopPlaying();
     filePlayer.startPlayingFile(TRACK_FINAL);
     isPlayingHint = true;
+    surprisePending = false; // Zrusit pripadne prekvapeni v pozadi
   }
 
-  // Úspěšné naťukání kódu -> stop zvuku a 1 minuta ticha
+  // Uspesne vyreseni -> stop zvuku a 1 minuta ticha
   if (cmdSolved) {
     cmdSolved = false;
     solvedTime = now;
-    hint8sPlayed = true;  // Blokujeme další nápovědy
-    hint60sPlayed = true;
+    hint8sPlayed = true;  
+    hint30sPlayed = true;
+    surprisePending = false;
     Log("Tukani uspesne: 1min ticho");
     if (isPlayingHint || filePlayer.playingMusic) {
       filePlayer.stopPlaying();
@@ -183,85 +186,107 @@ void loop() {
     isPlayingHint = false;
   }
 
-  // Příkaz pípnutí (ťuknutí uživatele)
+  // Prikaz pipnuti (tuknuti hrace) slouzi pouze k aktualizaci casovace
   if (cmdBeep) {
     cmdBeep = false;
-    lastTapTime = now; // Aktualizace posledního ťuknutí
+    lastTapTime = now; 
     
-    // Pokud je to první ťuknutí v nové sérii (po klidu nebo po resetu)
+    // Pokud je to prvni tuknuti v nove serii (po klidu nebo po resetu)
     if (tapSessionStartTime == 0) {
       tapSessionStartTime = now;
-      hint60sPlayed = false; // Reset limitu pro novou sérii
+      hint30sPlayed = false; 
     }
     
-    // Nové ťuknutí resetuje 8s nápovědu (aby se po dalším ztišení mohla znovu zahrát)
+    // Nove tuknuti resetuje 8s napovedu
     hint8sPlayed = false;
-
-    // Zastavíme nápovědu, pokud zrovna hrála
+    
+    // Zastavime napovedu, pokud zrovna hraje
     if (isPlayingHint) {
       filePlayer.stopPlaying();
       isPlayingHint = false;
-      lastHintPlayedTime = now; // Začátek cooldownu po ručním přerušení
+      lastHintPlayedTime = now; // Zacatek cooldownu po rucnim preruseni
     }
-    
-    // Povel ťuknutí slouží pouze k měření aktivity pro nápovědy.
   }
-
-  // --- 1. ČTENÍ DVEŘÍ (Pin 10) ---
+  
+  // --- 1. CTENI DVERI (Pin 10) ---
   bool currentDoorState = digitalRead(PIN_DVERE);
-  if (currentDoorState == HIGH && lastDoorState == LOW) { // Náběžná hrana - dveře se otevřely
-    Log("Dvere otevreny!");
+  if (currentDoorState == HIGH && lastDoorState == LOW) { // Nabezna hrana - dvere se otevrou
+    Log("Dvere otevreny! Za 3.5s hraje prekvapeni.");
     doorOpen = true;
     doorOpenTime = now;
+    
+    surprisePending = true;
+    gracePeriodStartTime = 0; // Grace period zacne az po dohrani surprise
+    
     lastTapTime = now;
     tapSessionStartTime = 0;
     hint8sPlayed = false;
-    hint60sPlayed = false;
+    hint30sPlayed = false;
     if (filePlayer.playingMusic) filePlayer.stopPlaying();
   } else if (currentDoorState == LOW) {
     doorOpen = false;
+    surprisePending = false;
   }
   lastDoorState = currentDoorState;
 
   // --- 2. HINT LOGIKA ---
+  
+  // 0) Moment prekvapeni (Surprise)
+  if (doorOpen && surprisePending && (now - doorOpenTime >= SURPRISE_DELAY_MS)) {
+    Log("Surprise! Hraji prvni rytmus po otevreni.");
+    filePlayer.stopPlaying();
+    filePlayer.startPlayingFile(TRACK_FINAL);
+    isPlayingHint = true;
+    surprisePending = false;
+  }
+
+  // Kdyz hint nebo prekvapeni dohraje do konce
+  if (isPlayingHint && !filePlayer.playingMusic) {
+    isPlayingHint = false;
+    lastHintPlayedTime = now; // Start cooldownu
+    
+    // Pokud jeste nezacala Grace Period (tzn. prave dohral moment prekvapeni)
+    if (gracePeriodStartTime == 0) {
+      gracePeriodStartTime = now;
+      lastTapTime = now; // Odsud se pocita pripadna necinnost
+      Log("Grace Period (90s) odstartovana.");
+    }
+  }
+
   bool inSolvedCooldown = (solvedTime > 0 && (now - solvedTime < SOLVED_COOLDOWN_MS));
-  bool inGracePeriod = (doorOpenTime > 0 && (now - doorOpenTime < GRACE_PERIOD_MS));
+  // Dokud gracePeriodStartTime == 0, jeste nezaznelo (nebo prave zni) prekvapeni, takze blokujeme bezne hinty
+  bool inGracePeriod = (gracePeriodStartTime > 0 && (now - gracePeriodStartTime < GRACE_PERIOD_MS)) || (gracePeriodStartTime == 0);
   bool inHintCooldown = (lastHintPlayedTime > 0 && (now - lastHintPlayedTime < HINT_COOLDOWN_MS));
 
-  if (doorOpen && !inSolvedCooldown && !pracovniMod && !inGracePeriod && !inHintCooldown) {
-    // 1) Pravidlo pro 8s neaktivitu: od posledního ťuknutí / otevření uběhlo 8 s
-    //    Přehraje se pouze 1x (dokud hráč znovu neťukne)
+  if (doorOpen && !inSolvedCooldown && !pracovniMod && !inGracePeriod && !inHintCooldown && !surprisePending) {
+    
+    // 1) Pravidlo pro 8s neaktivitu (prehraje se 1x, dokud hrac znovu netukne)
     if (!hint8sPlayed && lastTapTime > 0 && (now - lastTapTime >= 8000)) {
       if (!isPlayingHint && !filePlayer.playingMusic) {
         Log("Hint: 8s po tuknuti bez aktivity.");
         filePlayer.stopPlaying();
-        filePlayer.startPlayingFile(TRACK_FINAL); // Zvuk rytmu
+        filePlayer.startPlayingFile(TRACK_FINAL);
         isPlayingHint = true;
-        hint8sPlayed = true; // Označíme, že už nápověda proběhla a víckrát nehraje
-        tapSessionStartTime = 0; // Reset série ťukání
+        hint8sPlayed = true; 
+        tapSessionStartTime = 0; 
       }
     }
 
-    // 2) Po 60 s ťukání čekáme na 2s pauzu, abychom nepřerušili hráče uprostřed.
-    if (!hint60sPlayed && tapSessionStartTime > 0 && (now - tapSessionStartTime >= 60000)) {
+    // 2) Pravidlo pro dlouhe soustavne tukani (60s) s 2s pauzou na oddech
+    // Abychom hrace neprerusili uprostred vytukavani, cekame na kratkou 2s pauzu
+    if (!hint30sPlayed && tapSessionStartTime > 0 && (now - tapSessionStartTime >= 60000)) {
       if (!isPlayingHint && !filePlayer.playingMusic && (now - lastTapTime >= 2000)) {
         Log("Hint: 60s tukani a pauza.");
         filePlayer.stopPlaying();
-        filePlayer.startPlayingFile(TRACK_FINAL); // Zvuk rytmu
+        filePlayer.startPlayingFile(TRACK_FINAL); 
         isPlayingHint = true;
-        hint60sPlayed = true; // Označíme jako zahrané pro tuto sérii
+        hint30sPlayed = true; 
         hint8sPlayed = true;
       }
     }
   }
 
-  // Když hint dohraje do konce
-  if (isPlayingHint && !filePlayer.playingMusic) {
-    isPlayingHint = false;
-    lastHintPlayedTime = now; // Spuštění cooldownu (45 s)
-  }
-
-  // --- 3. LOGIKA SIGNÁLU (Pin 5) - ruční stop ---
+  // --- 3. LOGIKA SIGNALU (Pin 5) - rucni stop ---
   bool currentSignalState = digitalRead(PIN_SIGNAL_EXT);
   if (currentSignalState == LOW && lastSignalState == HIGH) {
     clickCount++;
@@ -280,7 +305,7 @@ void loop() {
     }
   }
 
-  // Běžné krmení bufferu mp3 čipu
+  // Bezne krmeni bufferu mp3 
   if (filePlayer.playingMusic) {
     filePlayer.feedBuffer();
   }
