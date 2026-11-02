@@ -32,7 +32,6 @@ void Log(const char* txt) {
 const int pinySenzoru[] = {A0, A1, A2};
 const int pinLED_PWM = 6;
 const int pinZamek = 11;
-const int pinReleLebka = 7;
 
 const int dobaOtevreniI2C = 1000;
 const int dobaPredServem = 220;
@@ -116,13 +115,11 @@ void setup() {
 
   pinMode(pinLED_PWM, OUTPUT);
   pinMode(pinZamek, OUTPUT);
-  pinMode(pinReleLebka, OUTPUT);
 
   servoSchranky.attach(pinServoSchranky);
   servoSchranky.write(servoZavreno);
 
   digitalWrite(pinZamek, LOW);
-  digitalWrite(pinReleLebka, LOW);
 }
 
 void loop() {
@@ -142,7 +139,6 @@ void loop() {
     casSekvenceSchranky = ted;
     schrankovaSekvence = SCHRANKA_ZAMEK;
     digitalWrite(pinZamek, HIGH);
-    digitalWrite(pinReleLebka, HIGH);
     cmdOpenLock = false;
   }
 
@@ -159,7 +155,6 @@ void loop() {
       if (ted - casSekvenceSchranky >= dobaOtevreniServa) {
         servoSchranky.write(servoZavreno);
         digitalWrite(pinZamek, LOW);
-        digitalWrite(pinReleLebka, LOW);
         casSekvenceSchranky = ted;
         schrankovaSekvence = SCHRANKA_ZAVIRANI;
       }
@@ -179,7 +174,6 @@ void loop() {
 
   if (i2cOpenActive && (ted - casStartuOtevreni >= dobaOtevreniI2C) && schrankovaSekvence == SCHRANKA_IDLE) {
     i2cOpenActive = false;
-    digitalWrite(pinReleLebka, LOW);
   }
 
   bool vsechnyKrystalyOk = true;
