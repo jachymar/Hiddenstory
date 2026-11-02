@@ -76,10 +76,8 @@ void receiveEvent(int howMany) {
 
 // *** PINY PRO SENZORY ***
 #define PIN_DVERE       10     
-#define PIN_SIGNAL_EXT   5     
 
 // *** NASTAVENI ***
-const unsigned long CLICK_WINDOW     = 450;  // Okno pro rozpoznani dvojkliku (ms)
 const int HLASITOST_HLAVNI = 20; 
 
 // *** SKLADBY ***
@@ -110,16 +108,8 @@ bool hint8sPlayed = false;
 bool hint30sPlayed = false;  
 unsigned long tapSessionStartTime = 0; 
 
-// Promenne pro Signal (Pin 5) - rucni stop
-bool lastSignalState = HIGH;
-int clickCount = 0;
-unsigned long lastClickTime = 0;
-bool waitingForDecision = false;
-
 // Funkce pro totalni zastaveni
 void stopEverything() {
-  waitingForDecision = false;
-  clickCount = 0;
   isPlayingHint = false;
   hint8sPlayed = false;
   hint30sPlayed = false;
@@ -136,7 +126,6 @@ void stopEverything() {
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_DVERE, INPUT_PULLUP);
-  pinMode(PIN_SIGNAL_EXT, INPUT_PULLUP);
   
   if (!filePlayer.begin()) { while (1); }
   if (!SD.begin(CARD_CS)) { while (1); }
@@ -283,25 +272,6 @@ void loop() {
         hint30sPlayed = true; 
         hint8sPlayed = true;
       }
-    }
-  }
-
-  // --- 3. LOGIKA SIGNALU (Pin 5) - rucni stop ---
-  bool currentSignalState = digitalRead(PIN_SIGNAL_EXT);
-  if (currentSignalState == LOW && lastSignalState == HIGH) {
-    clickCount++;
-    lastClickTime = now;
-    waitingForDecision = true;
-    delay(50); // Debounce
-  }
-  lastSignalState = currentSignalState;
-
-  if (waitingForDecision) {
-    if (clickCount >= 2) {
-      stopEverything();
-    } else if (now - lastClickTime > CLICK_WINDOW) {
-      waitingForDecision = false;
-      clickCount = 0;
     }
   }
 
