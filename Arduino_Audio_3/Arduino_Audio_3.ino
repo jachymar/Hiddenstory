@@ -11,6 +11,7 @@ volatile bool cmdStop = false;
 volatile bool cmdAlarm = false; 
 volatile bool cmdBeep = false;  
 volatile bool cmdSolved = false; // Příkaz pro vyřešené puzzle
+volatile bool cmdGameStarted = false;
 bool pracovniMod = false;
 
 char lastLog[30] = "Start";
@@ -51,6 +52,7 @@ void receiveEvent(int howMany) {
     }
     else if (c == '0') {
       pracovniMod = false;
+      cmdGameStarted = true;
     }
     else if (c == 'A') {
       cmdAlarm = true; // Rytmus lze spustit i v pracovnim modu
@@ -83,7 +85,6 @@ const int HLASITOST_HLAVNI = 20;
 
 // *** SKLADBY ***
 const char* TRACK_FINAL = "/0003.mp3"; // Hlavní nezastavitelný alarm
-const char* TRACK_BEEP = "/beep.mp3"; // Pípnutí při chybě / ťuknutí
 
 Adafruit_VS1053_FilePlayer filePlayer = 
   Adafruit_VS1053_FilePlayer(VS1053_RESET, VS1053_CS, VS1053_DCS, VS1053_DREQ, CARD_CS);
@@ -93,13 +94,16 @@ bool doorOpen = false;
 bool isPlayingHint = false;
 unsigned long solvedTime = 0;
 const unsigned long SOLVED_COOLDOWN_MS = 60000; // 1 minuta ticha po správném vyřešení
+const unsigned long GRACE_PERIOD_MS = 90000;    // 90 s ochrana po otevření dveří
+const unsigned long HINT_COOLDOWN_MS = 45000;   // 45 s pauza mezi nápovědami
 unsigned long doorOpenTime = 0;
 unsigned long lastTapTime = 0;
+unsigned long lastHintPlayedTime = 0;
 bool lastDoorState = LOW;
 
 // Nové příznaky pro nápovědu (jednorázové přehrání)
 bool hint8sPlayed = false;   // Příznak, že už proběhla nápověda po 8s neaktivitě
-bool hint30sPlayed = false;  // Příznak, že už proběhla nápověda po 30s aktivního ťukání
+bool hint60sPlayed = false;  // Příznak, že už proběhla nápověda po 60s ťukání
 unsigned long tapSessionStartTime = 0; // Začátek aktuální série ťukání
 
 // Proměnné pro Signál (Pin 5) - ponecháno pro ruční stop
@@ -114,8 +118,9 @@ void stopEverything() {
   clickCount = 0;
   isPlayingHint = false;
   hint8sPlayed = false;
-  hint30sPlayed = false;
+  hint60sPlayed = false;
   tapSessionStartTime = 0;
+  lastHintPlayedTime = 0;
   if (filePlayer.playingMusic) {
     filePlayer.stopPlaying();
   }
@@ -147,6 +152,11 @@ void loop() {
   myTelemetry.is_playing = filePlayer.playingMusic ? 1 : 0;
   myTelemetry.is_alarm_playing = isPlayingHint ? 1 : 0;
   
+  if (cmdGameStarted) {
+    cmdGameStarted = false;
+    lastTapTime = now; // Ochrana proti okamžitému spuštění nápovědy po zapnutí hry
+  }
+
   if (cmdStop) {
     cmdStop = false;
     stopEverything(); 
@@ -165,7 +175,7 @@ void loop() {
     cmdSolved = false;
     solvedTime = now;
     hint8sPlayed = true;  // Blokujeme další nápovědy
-    hint30sPlayed = true;
+    hint60sPlayed = true;
     Log("Tukani uspesne: 1min ticho");
     if (isPlayingHint || filePlayer.playingMusic) {
       filePlayer.stopPlaying();
@@ -181,7 +191,7 @@ void loop() {
     // Pokud je to první ťuknutí v nové sérii (po klidu nebo po resetu)
     if (tapSessionStartTime == 0) {
       tapSessionStartTime = now;
-      hint30sPlayed = false; // Reset 30s limitu pro novou sérii
+      hint60sPlayed = false; // Reset limitu pro novou sérii
     }
     
     // Nové ťuknutí resetuje 8s nápovědu (aby se po dalším ztišení mohla znovu zahrát)
@@ -191,11 +201,10 @@ void loop() {
     if (isPlayingHint) {
       filePlayer.stopPlaying();
       isPlayingHint = false;
+      lastHintPlayedTime = now; // Začátek cooldownu po ručním přerušení
     }
     
-    // Zvuk pípnutí (beep) zahrajeme
-    filePlayer.stopPlaying();
-    filePlayer.startPlayingFile(TRACK_BEEP);
+    // Povel ťuknutí slouží pouze k měření aktivity pro nápovědy.
   }
 
   // --- 1. ČTENÍ DVEŘÍ (Pin 10) ---
@@ -207,7 +216,7 @@ void loop() {
     lastTapTime = now;
     tapSessionStartTime = 0;
     hint8sPlayed = false;
-    hint30sPlayed = false;
+    hint60sPlayed = false;
     if (filePlayer.playingMusic) filePlayer.stopPlaying();
   } else if (currentDoorState == LOW) {
     doorOpen = false;
@@ -216,8 +225,10 @@ void loop() {
 
   // --- 2. HINT LOGIKA ---
   bool inSolvedCooldown = (solvedTime > 0 && (now - solvedTime < SOLVED_COOLDOWN_MS));
+  bool inGracePeriod = (doorOpenTime > 0 && (now - doorOpenTime < GRACE_PERIOD_MS));
+  bool inHintCooldown = (lastHintPlayedTime > 0 && (now - lastHintPlayedTime < HINT_COOLDOWN_MS));
 
-  if (doorOpen && !inSolvedCooldown && !pracovniMod) {
+  if (doorOpen && !inSolvedCooldown && !pracovniMod && !inGracePeriod && !inHintCooldown) {
     // 1) Pravidlo pro 8s neaktivitu: od posledního ťuknutí / otevření uběhlo 8 s
     //    Přehraje se pouze 1x (dokud hráč znovu neťukne)
     if (!hint8sPlayed && lastTapTime > 0 && (now - lastTapTime >= 8000)) {
@@ -231,15 +242,14 @@ void loop() {
       }
     }
 
-    // 2) Pravidlo pro 30s nepřetržitého ťukání:
-    //    Hráči stále ťukají, takže 8s ticho nenastává. Pokud série trvá déle než 30 s, přehrajeme nápovědu 1x.
-    if (!hint30sPlayed && tapSessionStartTime > 0 && (now - tapSessionStartTime >= 30000)) {
-      if (!isPlayingHint && !filePlayer.playingMusic) {
-        Log("Hint: 30s soustavneho tukani.");
+    // 2) Po 60 s ťukání čekáme na 2s pauzu, abychom nepřerušili hráče uprostřed.
+    if (!hint60sPlayed && tapSessionStartTime > 0 && (now - tapSessionStartTime >= 60000)) {
+      if (!isPlayingHint && !filePlayer.playingMusic && (now - lastTapTime >= 2000)) {
+        Log("Hint: 60s tukani a pauza.");
         filePlayer.stopPlaying();
         filePlayer.startPlayingFile(TRACK_FINAL); // Zvuk rytmu
         isPlayingHint = true;
-        hint30sPlayed = true; // Označíme jako zahrané pro tuto sérii
+        hint60sPlayed = true; // Označíme jako zahrané pro tuto sérii
         hint8sPlayed = true;
       }
     }
@@ -248,6 +258,7 @@ void loop() {
   // Když hint dohraje do konce
   if (isPlayingHint && !filePlayer.playingMusic) {
     isPlayingHint = false;
+    lastHintPlayedTime = now; // Spuštění cooldownu (45 s)
   }
 
   // --- 3. LOGIKA SIGNÁLU (Pin 5) - ruční stop ---
