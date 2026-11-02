@@ -1106,18 +1106,25 @@ void loop() {
       if (tlacitka_online) {
         static bool chybaOdeslana = false;
         static bool otevrenoOdeslano = false;
+        static bool cekajiciChyba = false;
+        
         if (prectenoTlacitka == 4) {
           // 3x špatné heslo nebo 30 s neaktivity -> servo na Světlech vysype kuličku
           if (!chybaOdeslana) {
-            posliPrikazI2C(ADDR_SVETLA, 'E');
-            Serial.println("Odesilan prikaz E (Chyba) na Svetla.");
-            chybaOdeslana = true;
+            if (physSvetlaState != 1) {
+              posliPrikazI2C(ADDR_SVETLA, 'E');
+              Serial.println("Odesilan prikaz E (Chyba) na Svetla.");
+              chybaOdeslana = true;
+            } else {
+              cekajiciChyba = true; // Odložíme vysypání až po zhasnutí kaskády
+            }
           }
         } else if (prectenoTlacitka == 5) {
           // Schránka otevřena tlačítky -> zastavit kaskádu a zablokovat její další spouštění
           if (!otevrenoOdeslano) {
             schrankaTlacitkaOtevrena = true;
             dataTlacitka.lock_open = 1;
+            cekajiciChyba = false; // Úspěch ruší případnou čekající chybu
             posliPrikazI2C(ADDR_SVETLA, 'O');
             Serial.println("Odesilan prikaz O (Schranka otevrena) na Svetla.");
             otevrenoOdeslano = true;
@@ -1126,6 +1133,14 @@ void loop() {
         } else {
           chybaOdeslana = false;
           otevrenoOdeslano = false;
+        }
+
+        // Zpracování odložené chyby, jakmile kaskáda skončí
+        if (cekajiciChyba && physSvetlaState != 1) {
+          posliPrikazI2C(ADDR_SVETLA, 'E');
+          Serial.println("Odesilan odlozeny prikaz E (Chyba) na Svetla (Kaskada dobehla).");
+          cekajiciChyba = false;
+          chybaOdeslana = true; // Zabráníme okamžitému opakování
         }
       }
 
