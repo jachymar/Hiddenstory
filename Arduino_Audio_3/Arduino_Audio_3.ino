@@ -14,6 +14,7 @@ volatile bool cmdSolved = false; // Prikaz pro vyreseni puzzle
 
 bool pracovniMod = false;
 char lastLog[30] = "Start";
+unsigned long lastTapTime = 0;
 
 void Log(const char* txt) {
   strncpy(lastLog, txt, 29);
@@ -102,7 +103,6 @@ bool surprisePending = false;
 unsigned long gracePeriodStartTime = 0;
 
 unsigned long doorOpenTime = 0;
-unsigned long lastTapTime = 0;
 unsigned long lastHintPlayedTime = 0;
 bool lastDoorState = LOW;
 
